@@ -1,0 +1,26 @@
+[Unit]
+Description=Control de video GPIO + VLC (sin entorno gráfico, salida DRM/HDMI)
+After=multi-user.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=video1
+Group=video1
+SupplementaryGroups=video render input
+WorkingDirectory=/home/video1
+# Sin X11 (evitar que VLC intente xlib si DISPLAY quedó definido)
+Environment=DISPLAY=
+# Opcional: forzar un vout; si no, el script prueba drm luego fb
+# Environment=VLC_VOUT=fb
+# Esperar a que exista el dispositivo DRM del HDMI
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do test -e /dev/dri/card0 && exit 0; sleep 1; done; echo "WARN: /dev/dri/card0 no apareció"; exit 0'
+ExecStartPre=/bin/sleep 8
+ExecStart=/usr/bin/python3 /home/video1/video_control.py
+Restart=on-failure
+RestartSec=8
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
