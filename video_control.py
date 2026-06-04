@@ -1,3 +1,6 @@
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.0.0"""
+__version__ = "1.0.0"
+
 import os
 import sys
 import vlc
@@ -25,7 +28,7 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-logger.info("Iniciando programa de control de video...")
+logger.info(f"Iniciando video-player v{__version__}...")
 
 # GPIO (Raspberry Pi 5, chip 0) — pull-up interno, botón a GND
 GPIO_LOOP = 23       # toggle loop corto 14s–14.5s
