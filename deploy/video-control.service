@@ -11,6 +11,10 @@ SupplementaryGroups=video render input
 WorkingDirectory=/home/video1/video-player
 # Sin X11 (evitar que VLC intente xlib si DISPLAY quedó definido)
 Environment=DISPLAY=
+# Audio: hdmi (default) o externa — descomentar para placa USB/HAT:
+# Environment=AUDIO_SALIDA=externa
+# Environment=ALSA_EXTERNA=plughw:1,0
+# Environment=ALSA_HDMI=plughw:CARD=vc4hdmi0,DEV=0
 # Opcional: forzar un vout; si no, el script prueba drm luego fb
 # Environment=VLC_VOUT=fb
 # Esperar a que exista el dispositivo DRM del HDMI

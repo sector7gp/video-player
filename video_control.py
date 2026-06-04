@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.1.0"""
-__version__ = "1.1.0"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.2.0"""
+__version__ = "1.2.0"
 
 import os
 import sys
@@ -62,14 +62,44 @@ RESTART_MS = 20
 REINICIO_LOOP_MS = 0
 MARGEN_ANTES_FIN_MS = 400
 
+# Audio: "hdmi" (por defecto) o "externa" (placa USB / HAT). También: variable de entorno AUDIO_SALIDA.
+# Dispositivos ALSA: listar con `aplay -l` y probar con `speaker-test -D plughw:1,0 -c2`
+AUDIO_SALIDA = os.environ.get("AUDIO_SALIDA", "hdmi").strip().lower()
+ALSA_HDMI = os.environ.get("ALSA_HDMI", "plughw:CARD=vc4hdmi0,DEV=0")
+ALSA_EXTERNA = os.environ.get("ALSA_EXTERNA", "plughw:1,0")
+
+
+def opciones_vlc():
+    """Opciones de instancia VLC (video + audio ALSA)."""
+    opts = ["--input-repeat=-1", "--aout=alsa"]
+    if AUDIO_SALIDA == "externa":
+        device = ALSA_EXTERNA
+        etiqueta = "placa externa"
+    elif AUDIO_SALIDA == "hdmi":
+        device = ALSA_HDMI
+        etiqueta = "HDMI"
+    else:
+        logger.warning(
+            f"AUDIO_SALIDA='{AUDIO_SALIDA}' no válido (use hdmi o externa). Usando HDMI."
+        )
+        device = ALSA_HDMI
+        etiqueta = "HDMI (fallback)"
+    opts.append(f"--alsa-audio-device={device}")
+    return opts, device, etiqueta
+
+
 # Inicializar VLC (configuración mínima, sin vout=drm ni opciones extra)
 try:
-    instance = vlc.Instance('--input-repeat=-1')
+    vlc_args, alsa_device, audio_etiqueta = opciones_vlc()
+    instance = vlc.Instance(" ".join(vlc_args))
     player = instance.media_player_new()
     media = instance.media_new(PATH_VIDEO)
-    media.add_option(':input-repeat=-1')
+    media.add_option(":input-repeat=-1")
+    media.add_option(":aout=alsa")
+    media.add_option(f":alsa-audio-device={alsa_device}")
     player.set_media(media)
     logger.info(f"VLC inicializado con el video: {PATH_VIDEO}")
+    logger.info(f"Audio: {audio_etiqueta} ({alsa_device})")
 except Exception as e:
     logger.error(f"Error al inicializar VLC: {e}")
     sys.exit(1)

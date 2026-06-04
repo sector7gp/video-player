@@ -1,10 +1,10 @@
-# video-player v1.1
+# video-player v1.2
 
 Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por GPIO (tramo corto y reinicio), arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 1.1 — Resumen
+## Versión 1.2 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
@@ -14,6 +14,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 | Loop corto | 14,0 s → 14,5 s (toggle GPIO23) |
 | Reinicio GPIO24 | Seek a 20 ms |
 | Loop principal | Reinicio anticipado en `REINICIO_LOOP_MS` (sin esperar al final) |
+| Audio | `hdmi` (default) o `externa` (`AUDIO_SALIDA`) |
 | Servicio | `video-control.service` → `multi-user.target` |
 
 ## Características
@@ -24,6 +25,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 - Loop principal: al llegar a `REINICIO_LOOP_MS` vuelve a `RESTART_MS` antes del final (evita pantalla negra del buffer).
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
 - Log en `control.log` dentro del directorio del proyecto.
+- **Audio:** salida por **HDMI** o **placa externa** (USB/HAT) vía ALSA, configurable.
 
 ## Requisitos
 
@@ -101,10 +103,55 @@ Editar constantes al inicio de `video_control.py`:
 | `RESTART_MS` | `20` | Posición de reinicio (ms) |
 | `REINICIO_LOOP_MS` | `0` | Tiempo (ms) para reiniciar el loop principal; `0` = fin del archivo − margen |
 | `MARGEN_ANTES_FIN_MS` | `400` | Margen antes del final si `REINICIO_LOOP_MS = 0` |
+| `AUDIO_SALIDA` | `hdmi` | `hdmi` o `externa` |
+| `ALSA_HDMI` | `plughw:CARD=vc4hdmi0,DEV=0` | Dispositivo ALSA para HDMI |
+| `ALSA_EXTERNA` | `plughw:1,0` | Dispositivo ALSA para placa externa |
 | `DEBOUNCE_TOGGLE_S` | `0.40` | Antirebote software (s) |
 | `PULSO_MINIMO_S` | `0.05` | Pulso mínimo válido (s) |
 
 Tras cambios en el script: `sudo systemctl restart video-control.service`.
+
+## Audio (HDMI o placa externa)
+
+Por defecto el sonido sale por **HDMI** (`AUDIO_SALIDA = "hdmi"`).
+
+### Usar placa de audio externa
+
+1. Conectá la placa (USB o HAT) y listá dispositivos:
+
+```bash
+aplay -l
+```
+
+2. Probá el dispositivo (ej. tarjeta 1):
+
+```bash
+speaker-test -D plughw:1,0 -c2 -t wav
+```
+
+3. En `video_control.py`:
+
+```python
+AUDIO_SALIDA = "externa"
+ALSA_EXTERNA = "plughw:1,0"   # ajustar según aplay -l
+```
+
+O con variables de entorno (sin editar el script), en el servicio systemd:
+
+```ini
+Environment=AUDIO_SALIDA=externa
+Environment=ALSA_EXTERNA=plughw:1,0
+```
+
+4. Reiniciá el servicio:
+
+```bash
+sudo systemctl restart video-control.service
+```
+
+En `control.log` debe aparecer: `Audio: placa externa (plughw:1,0)`.
+
+Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4hdmi1,DEV=0` en `ALSA_HDMI`.
 
 ## Cómo funciona el reinicio
 
@@ -133,6 +180,11 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v1.2.0 (2026-06-04)
+
+- Audio configurable: `AUDIO_SALIDA` = `hdmi` o `externa` (ALSA en VLC).
+- Variables `ALSA_HDMI` / `ALSA_EXTERNA` y ejemplos en el servicio systemd.
 
 ### v1.1.0 (2026-06-04)
 
