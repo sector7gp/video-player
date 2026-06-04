@@ -3,7 +3,7 @@
 set -euo pipefail
 
 USER_NAME="${1:-video1}"
-HOME_DIR="/home/${USER_NAME}"
+PROJECT_DIR="/home/${USER_NAME}/video-player"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/deploy/video-control.service"
 SERVICE_DST="/etc/systemd/system/video-control.service"
@@ -13,16 +13,17 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ ! -f "${HOME_DIR}/video_control.py" ]]; then
-  echo "No existe ${HOME_DIR}/video_control.py"
+if [[ ! -f "${PROJECT_DIR}/video_control.py" ]]; then
+  echo "No existe ${PROJECT_DIR}/video_control.py"
+  echo "Cloná el repo: git clone https://github.com/sector7gp/video-player.git ${PROJECT_DIR}"
   exit 1
 fi
 
-sed "s|/home/video1|${HOME_DIR}|g; s|User=video1|User=${USER_NAME}|g; s|Group=video1|Group=${USER_NAME}|g" \
+sed "s|/home/video1/video-player|${PROJECT_DIR}|g; s|User=video1|User=${USER_NAME}|g; s|Group=video1|Group=${USER_NAME}|g" \
   "${SERVICE_SRC}" > "${SERVICE_DST}"
 
 # Quitar autostart de escritorio si existía (no aplica sin GUI)
-rm -f "${HOME_DIR}/.config/autostart/video-control.desktop"
+rm -f "/home/${USER_NAME}/.config/autostart/video-control.desktop"
 
 systemctl daemon-reload
 systemctl enable video-control.service

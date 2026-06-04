@@ -18,7 +18,7 @@ Repositorio: [github.com/sector7gp/video-player](https://github.com/sector7gp/vi
 
 - Raspberry Pi 5 (GPIO vía `lgpio`)
 - Raspberry Pi OS con VLC y Python 3
-- Video en disco (por defecto `/home/video1/video1.mp4`)
+- Video en disco (por defecto `/media/video1.mp4`)
 - Botones a **GND** (pull-up interno en los pines)
 
 ### Paquetes
@@ -46,7 +46,7 @@ No hace falta resistencia externa si usás `pull_up=True` en el código.
 ## Uso manual
 
 ```bash
-cd /home/video1
+cd /home/video1/video-player
 python3 video_control.py
 ```
 
@@ -72,7 +72,7 @@ Si igual llega a `Ended`, el bucle principal del script reinicia en `RESTART_MS`
 
 | Constante | Default | Descripción |
 |-----------|---------|-------------|
-| `PATH_VIDEO` | `/home/video1/video1.mp4` | Archivo de video |
+| `PATH_VIDEO` | `/media/video1.mp4` | Archivo de video |
 | `GPIO_LOOP` | `23` | Pin del loop |
 | `GPIO_REINICIO` | `24` | Pin de reinicio |
 | `INICIO_LOOP_MS` | `14000` | Inicio del tramo de loop (ms) |
@@ -83,11 +83,17 @@ Si igual llega a `Ended`, el bucle principal del script reinicia en `RESTART_MS`
 
 ## Arranque automático (systemd)
 
-1. Copiá el proyecto a la Pi (p. ej. `/home/video1/`).
-2. Ajustá usuario/rutas en `deploy/video-control.service` si no usás `video1`.
-3. Instalá:
+1. Cloná el repo en la Pi:
 
 ```bash
+git clone https://github.com/sector7gp/video-player.git /home/video1/video-player
+```
+
+2. Colocá el MP4 en `/media/video1.mp4` (o cambiá `PATH_VIDEO` en `video_control.py`).
+3. Instalá el servicio (ajusta el usuario si no es `video1`):
+
+```bash
+cd /home/video1/video-player
 sudo bash deploy/install-service.sh video1
 sudo reboot
 ```
@@ -97,7 +103,7 @@ Comandos útiles:
 ```bash
 sudo systemctl status video-control.service
 journalctl -u video-control.service -f
-tail -f /home/video1/control.log
+tail -f /home/video1/video-player/control.log
 ```
 
 El unit en `deploy/` está orientado a arranque **sin escritorio** (`multi-user.target`, espera `/dev/dri/card0`). Si tu instalación usa **X11** y `DISPLAY=:0`, adaptá el `.service` localmente (no incluido por defecto en el repo).
@@ -118,6 +124,11 @@ El unit en `deploy/` está orientado a arranque **sin escritorio** (`multi-user.
 - Si VLC falla al crear salida de video, evitá forzar `--vout=drm` en Python: la configuración actual usa solo `vlc.Instance('--input-repeat=-1')`, igual que `player.py`.
 
 ## Historial de cambios
+
+### 2026-06-04 (rutas)
+
+- Proyecto en `/home/video1/video-player`; video en `/media/video1.mp4`.
+- `video-control.service` e `install-service.sh` alineados (sin duplicar ruta en el `sed`).
 
 ### 2026-06-04
 

@@ -11,7 +11,7 @@ factory = LGPIOFactory(chip=0)
 boton = Button(18, pull_up=True, pin_factory=factory, bounce_time=0.05)
 
 # Ruta de tu video 4K (Se recomienda formato .mp4 con codec H.265)
-PATH_VIDEO = "/home/video1/video1.mp4"
+PATH_VIDEO = "/media/video1.mp4"
 
 # Inicializar VLC
 instance = vlc.Instance('--input-repeat=0')
