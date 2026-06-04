@@ -113,14 +113,13 @@ Tras cambios en el script: `sudo systemctl restart video-control.service`.
 - **GPIO24 / seek manual:** `ir_a_tiempo(ms)` — seek rápido; si VLC está `Ended`, `stop()` breve y `play()`.
 - **Respaldo:** si igual llega a `Ended`, reinicio con `ir_a_tiempo(RESTART_MS)`.
 
-VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`), compatible con la referencia `player.py`.
+VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`).
 
 ## Estructura del repositorio
 
 ```
 video-player/
 ├── video_control.py      # Programa principal (v1.1)
-├── player.py             # Referencia mínima (desarrollo)
 ├── VERSION               # 1.1.0
 ├── README.md
 └── deploy/
@@ -137,6 +136,7 @@ video-player/
 
 ### v1.1.0 (2026-06-04)
 
+- Eliminado `player.py` (referencia obsoleta; solo `video_control.py`).
 - **Loop principal anticipado:** `REINICIO_LOOP_MS` reinicia en `RESTART_MS` antes del final del MP4 (evita pantalla negra del buffer).
 - Modo automático: `REINICIO_LOOP_MS = 0` usa `duración − MARGEN_ANTES_FIN_MS`.
 - Respaldo si VLC llega igual a `Ended` (umbral mal configurado).

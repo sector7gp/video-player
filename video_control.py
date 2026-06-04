@@ -62,7 +62,7 @@ RESTART_MS = 20
 REINICIO_LOOP_MS = 0
 MARGEN_ANTES_FIN_MS = 400
 
-# Inicializar VLC — igual que player.py (sin vout=drm ni opciones extra)
+# Inicializar VLC (configuración mínima, sin vout=drm ni opciones extra)
 try:
     instance = vlc.Instance('--input-repeat=-1')
     player = instance.media_player_new()
