@@ -59,6 +59,7 @@ try:
     instance = vlc.Instance('--input-repeat=-1')
     player = instance.media_player_new()
     media = instance.media_new(PATH_VIDEO)
+    media.add_option(':input-repeat=-1')
     player.set_media(media)
     logger.info(f"VLC inicializado con el video: {PATH_VIDEO}")
 except Exception as e:
@@ -87,9 +88,12 @@ def asegurar_reproduciendo():
         player.play()
 
 def ir_a_tiempo(ms):
-    """Seek instantáneo (mismo método que el inicio del loop corto)."""
+    """Seek instantáneo; si el video terminó (Ended), stop breve y play."""
+    if player.get_state() in (vlc.State.Ended, vlc.State.Stopped):
+        player.stop()
+        time.sleep(0.03)
     player.set_time(ms)
-    asegurar_reproduciendo()
+    player.play()
 
 def iniciar_loop():
     """Toggle ON: guarda posición actual y entra al loop del tramo."""
@@ -194,13 +198,13 @@ try:
                 esperando_seek = True
                 player.set_time(INICIO_LOOP_MS)
 
-        # 2. Respaldo si el video termina (no durante loop corto)
+        # 2. Si el video termina, VLC queda en Ended: hace falta stop+play
         elif state == vlc.State.Ended:
             ahora = time.monotonic()
-            if ahora - ultimo_reintento_fin >= 1.0:
+            if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
                 logger.info(
-                    f"Video finalizado. Reinicio rápido a {RESTART_MS} ms (loop principal)..."
+                    f"Video finalizado. Reiniciando en {RESTART_MS} ms (loop principal)..."
                 )
                 ir_a_tiempo(RESTART_MS)
 

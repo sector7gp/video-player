@@ -8,7 +8,8 @@ Repositorio: [github.com/sector7gp/video-player](https://github.com/sector7gp/vi
 
 - Reproducción continua de un MP4 (loop nativo VLC con `--input-repeat=-1`).
 - **GPIO23**: toggle — pulsar y soltar activa/desactiva un loop entre dos marcas de tiempo; al desactivar vuelve a la posición donde estaba.
-- **GPIO24**: reinicio rápido por seek a `RESTART_MS` (sin `stop()`, evita pantalla negra).
+- **GPIO24**: reinicio rápido por seek a `RESTART_MS` (sin pantalla negra en reproducción normal).
+- **Fin del video**: si VLC entra en estado `Ended`, reinicio automático a `RESTART_MS` (con `stop()` breve solo en ese caso).
 - Antirebote hardware (gpiozero) y software en los botones.
 - Log en consola y en `control.log` junto al script.
 - Servicio **systemd** opcional para arranque al boot (`deploy/`).
@@ -54,7 +55,18 @@ python3 video_control.py
 | Acción | Comportamiento |
 |--------|----------------|
 | **GPIO23** — pulsar y soltar | Activa loop en el tramo configurado; otro pulso lo desactiva y restaura la posición guardada |
-| **GPIO24** — pulsar y soltar | Seek rápido al inicio del video (`RESTART_MS`, por defecto 20 ms) |
+| **GPIO24** — pulsar y soltar | Seek rápido a `RESTART_MS` (por defecto 20 ms desde el inicio) |
+
+### Reinicio y loop del archivo completo
+
+La función `ir_a_tiempo(ms)` hace un **seek directo** mientras el video está reproduciendo (GPIO23/24, loop corto). Si el reproductor está en **`Ended`** o **`Stopped`** (p. ej. al terminar el MP4), primero ejecuta un `stop()` de ~30 ms y luego `set_time` + `play()` para salir del estado congelado.
+
+Además, VLC tiene repetición en dos niveles:
+
+- Instancia: `--input-repeat=-1`
+- Medio: `:input-repeat=-1`
+
+Si igual llega a `Ended`, el bucle principal del script reinicia en `RESTART_MS` como respaldo.
 
 ## Configuración (`video_control.py`)
 
@@ -104,6 +116,15 @@ El unit en `deploy/` está orientado a arranque **sin escritorio** (`multi-user.
 - Se recomienda MP4 con **H.265** o **H.264**; 4K en Pi 5 puede requerir buen cooling y alimentación.
 - El loop corto usa `set_time()` al llegar a `FIN_LOOP_MS` (mismo criterio que el reinicio rápido).
 - Si VLC falla al crear salida de video, evitá forzar `--vout=drm` en Python: la configuración actual usa solo `vlc.Instance('--input-repeat=-1')`, igual que `player.py`.
+
+## Historial de cambios
+
+### 2026-06-04
+
+- **Fix fin de video congelado**: en estado `Ended`, `set_time()` solo no reinicia; `ir_a_tiempo()` hace `stop()` + `play()` solo si el estado es `Ended`/`Stopped`.
+- **Repetición VLC**: añadido `:input-repeat=-1` en el objeto `media` además de la instancia.
+- **Reintento al terminar**: el bucle principal reintenta cada 0,5 s (antes 1 s) si el video finaliza.
+- **GPIO23 / GPIO24**, toggle de loop, reinicio a 20 ms, VLC minimal (sin `vout=drm`), documentación y `deploy/` (commits anteriores en el repo).
 
 ## Licencia
 
