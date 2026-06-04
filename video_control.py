@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.0.0"""
-__version__ = "1.0.0"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.1.0"""
+__version__ = "1.1.0"
 
 import os
 import sys
@@ -56,6 +56,11 @@ PATH_VIDEO = "/media/video1.mp4"
 
 # Reinicio rápido (seek, sin stop/set_media — evita pantalla negra)
 RESTART_MS = 20
+# Loop principal: reiniciar al llegar a este tiempo (ms), sin esperar al final del archivo.
+# Ajustá según la duración del MP4 (ej. video de 3 min → 177000 si cortás ~3 s antes del fin).
+# Si es 0, se usa la duración del archivo menos MARGEN_ANTES_FIN_MS (automático).
+REINICIO_LOOP_MS = 0
+MARGEN_ANTES_FIN_MS = 400
 
 # Inicializar VLC — igual que player.py (sin vout=drm ni opciones extra)
 try:
@@ -81,6 +86,8 @@ estado_loop_corto = False
 posicion_guardada_ms = None
 esperando_seek = False
 ultimo_reintento_fin = 0.0
+esperando_seek_principal = False
+umbral_reinicio_cache = None
 momento_presion_loop = 0.0
 ultimo_toggle = 0.0
 ultimo_reinicio_gpio = 0.0
@@ -97,6 +104,30 @@ def ir_a_tiempo(ms):
         time.sleep(0.03)
     player.set_time(ms)
     player.play()
+
+def obtener_umbral_reinicio():
+    """Devuelve el tiempo (ms) en el que el loop principal vuelve a RESTART_MS."""
+    global umbral_reinicio_cache
+    if umbral_reinicio_cache is not None:
+        return umbral_reinicio_cache
+    if REINICIO_LOOP_MS > 0:
+        umbral_reinicio_cache = REINICIO_LOOP_MS
+    else:
+        duracion = player.get_length()
+        if duracion > 0:
+            umbral_reinicio_cache = max(
+                RESTART_MS + TOLERANCIA_MS,
+                duracion - MARGEN_ANTES_FIN_MS,
+            )
+            logger.info(
+                f"Reinicio automático del loop principal en {umbral_reinicio_cache} ms "
+                f"(duración {duracion} ms, margen {MARGEN_ANTES_FIN_MS} ms)."
+            )
+        else:
+            umbral_reinicio_cache = None
+    if umbral_reinicio_cache is not None and REINICIO_LOOP_MS > 0:
+        logger.info(f"Reinicio del loop principal en {umbral_reinicio_cache} ms.")
+    return umbral_reinicio_cache
 
 def iniciar_loop():
     """Toggle ON: guarda posición actual y entra al loop del tramo."""
@@ -201,15 +232,40 @@ try:
                 esperando_seek = True
                 player.set_time(INICIO_LOOP_MS)
 
-        # 2. Si el video termina, VLC queda en Ended: hace falta stop+play
-        elif state == vlc.State.Ended:
-            ahora = time.monotonic()
-            if ahora - ultimo_reintento_fin >= 0.5:
-                ultimo_reintento_fin = ahora
+        # 2. Loop principal: reinicio anticipado (evita negro al llegar al final real)
+        else:
+            current_time = player.get_time()
+            umbral = obtener_umbral_reinicio()
+
+            if esperando_seek_principal:
+                if current_time < 0:
+                    pass
+                elif current_time <= RESTART_MS + TOLERANCIA_MS:
+                    esperando_seek_principal = False
+                time.sleep(0.02)
+                continue
+
+            if (
+                umbral is not None
+                and current_time >= 0
+                and current_time >= umbral
+            ):
+                esperando_seek_principal = True
                 logger.info(
-                    f"Video finalizado. Reiniciando en {RESTART_MS} ms (loop principal)..."
+                    f"Loop principal: reinicio anticipado ({current_time} ms "
+                    f"≥ {umbral} ms) → {RESTART_MS} ms."
                 )
-                ir_a_tiempo(RESTART_MS)
+                player.set_time(RESTART_MS)
+
+            # Respaldo por si igual llega a Ended (p. ej. umbral mal configurado)
+            elif state == vlc.State.Ended:
+                ahora = time.monotonic()
+                if ahora - ultimo_reintento_fin >= 0.5:
+                    ultimo_reintento_fin = ahora
+                    logger.warning(
+                        f"Video en Ended; reinicio de respaldo a {RESTART_MS} ms."
+                    )
+                    ir_a_tiempo(RESTART_MS)
 
         time.sleep(0.05)
 

@@ -1,10 +1,10 @@
-# video-player v1.0
+# video-player v1.1
 
 Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por GPIO (tramo corto y reinicio), arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 1.0 — Resumen
+## Versión 1.1 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
@@ -12,7 +12,8 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 | Proyecto en la Pi | `/home/video1/video-player` |
 | Video | `/media/video1.mp4` |
 | Loop corto | 14,0 s → 14,5 s (toggle GPIO23) |
-| Reinicio | Seek a 20 ms (GPIO24) |
+| Reinicio GPIO24 | Seek a 20 ms |
+| Loop principal | Reinicio anticipado en `REINICIO_LOOP_MS` (sin esperar al final) |
 | Servicio | `video-control.service` → `multi-user.target` |
 
 ## Características
@@ -20,7 +21,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
 - **GPIO23** — pulsar y soltar: activa/desactiva loop en el tramo; al desactivar restaura la posición guardada.
 - **GPIO24** — pulsar y soltar: reinicio rápido a `RESTART_MS` (20 ms).
-- Al terminar el archivo, reinicio automático si VLC queda en `Ended` (sin quedar congelado).
+- Loop principal: al llegar a `REINICIO_LOOP_MS` vuelve a `RESTART_MS` antes del final (evita pantalla negra del buffer).
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
 - Log en `control.log` dentro del directorio del proyecto.
 
@@ -98,6 +99,8 @@ Editar constantes al inicio de `video_control.py`:
 | `INICIO_LOOP_MS` | `14000` | Inicio del tramo (ms) |
 | `FIN_LOOP_MS` | `14500` | Fin del tramo (ms) |
 | `RESTART_MS` | `20` | Posición de reinicio (ms) |
+| `REINICIO_LOOP_MS` | `0` | Tiempo (ms) para reiniciar el loop principal; `0` = fin del archivo − margen |
+| `MARGEN_ANTES_FIN_MS` | `400` | Margen antes del final si `REINICIO_LOOP_MS = 0` |
 | `DEBOUNCE_TOGGLE_S` | `0.40` | Antirebote software (s) |
 | `PULSO_MINIMO_S` | `0.05` | Pulso mínimo válido (s) |
 
@@ -105,9 +108,10 @@ Tras cambios en el script: `sudo systemctl restart video-control.service`.
 
 ## Cómo funciona el reinicio
 
-- **En reproducción:** `ir_a_tiempo(ms)` hace seek + `play()` (rápido, sin pantalla negra).
-- **Si VLC está `Ended`/`Stopped`:** `stop()` breve (~30 ms), luego seek y `play()`.
-- **Respaldo:** el bucle principal detecta `Ended` cada 0,5 s y reinicia en `RESTART_MS`.
+- **Loop principal:** cuando `get_time() >= REINICIO_LOOP_MS`, hace `set_time(RESTART_MS)` sin esperar al final del MP4 (evita el negro del buffer).
+- Con `REINICIO_LOOP_MS = 0`, el umbral se calcula solo: `duración del video − MARGEN_ANTES_FIN_MS`.
+- **GPIO24 / seek manual:** `ir_a_tiempo(ms)` — seek rápido; si VLC está `Ended`, `stop()` breve y `play()`.
+- **Respaldo:** si igual llega a `Ended`, reinicio con `ir_a_tiempo(RESTART_MS)`.
 
 VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`), compatible con la referencia `player.py`.
 
@@ -115,9 +119,9 @@ VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`), compat
 
 ```
 video-player/
-├── video_control.py      # Programa principal (v1.0)
+├── video_control.py      # Programa principal (v1.1)
 ├── player.py             # Referencia mínima (desarrollo)
-├── VERSION               # 1.0.0
+├── VERSION               # 1.1.0
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -130,6 +134,12 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v1.1.0 (2026-06-04)
+
+- **Loop principal anticipado:** `REINICIO_LOOP_MS` reinicia en `RESTART_MS` antes del final del MP4 (evita pantalla negra del buffer).
+- Modo automático: `REINICIO_LOOP_MS = 0` usa `duración − MARGEN_ANTES_FIN_MS`.
+- Respaldo si VLC llega igual a `Ended` (umbral mal configurado).
 
 ### v1.0.0 (2026-06-04)
 
