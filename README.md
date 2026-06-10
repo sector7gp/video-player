@@ -225,6 +225,10 @@ video-player/
 
 ## Changelog
 
+### v1.3.1 (2026-06-09)
+
+- Fix: metadatos del video al arranque (parse `fetch_local`, lectura tras `play()`, fallback ffprobe).
+
 ### v1.3.0 (2026-06-09)
 
 - Configuración en `config.json`: ruta del video, loop corto y loop principal.

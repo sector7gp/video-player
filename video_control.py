@@ -1,8 +1,9 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.0"""
-__version__ = "1.3.0"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.1"""
+__version__ = "1.3.1"
 
 import json
 import os
+import subprocess
 import sys
 import vlc
 import time
@@ -158,26 +159,81 @@ def _puntero_struct(puntero):
     return puntero.contents if hasattr(puntero, "contents") else puntero[0]
 
 
-def registrar_info_video(media, path):
-    """Registra duración y especificaciones del video en los logs."""
-    logger.info(f"Video: {path}")
+PARSE_TIMEOUT_MS = 15000
+METADATA_WAIT_S = 8.0
 
-    duracion = media.get_duration()
-    if duracion > 0:
-        logger.info(f"Duración: {duracion} ms ({formatear_duracion(duracion)})")
-    else:
-        logger.warning("Duración del video no disponible tras el parse.")
 
+def _esperar_parse_media(media, timeout_ms=PARSE_TIMEOUT_MS):
+    """Parsea el medio y espera a que VLC termine de leer metadatos."""
+    flags = vlc.MediaParseFlag.fetch_local
+    try:
+        if media.parse_with_options(flags, timeout_ms) == -1:
+            media.parse()
+    except Exception:
+        try:
+            media.parse()
+        except Exception:
+            pass
+
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        try:
+            status = media.get_parsed_status()
+            if status == vlc.MediaParsedStatus.done:
+                return
+            if status in (
+                vlc.MediaParsedStatus.failed,
+                vlc.MediaParsedStatus.timeout,
+            ):
+                return
+        except Exception:
+            return
+        time.sleep(0.05)
+
+
+def _esperar_reproduccion_lista(player, timeout_s=METADATA_WAIT_S):
+    """Espera a que VLC reporte duración tras iniciar la reproducción."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if player.get_length() > 0:
+            return True
+        if player.get_state() in (vlc.State.Playing, vlc.State.Paused):
+            time.sleep(0.15)
+            if player.get_length() > 0:
+                return True
+        time.sleep(0.1)
+    return player.get_length() > 0
+
+
+def _duracion_ms(media, player):
+    """Obtiene duración desde media o reproductor."""
+    for fuente in (media.get_duration, player.get_length):
+        try:
+            ms = fuente()
+            if ms and ms > 0:
+                return ms
+        except Exception:
+            pass
+    return -1
+
+
+def _leer_pistas_vlc(media):
+    """Lee pistas del medio; devuelve lista vacía si no hay soporte."""
     try:
         tracks = media.tracks_get()
-    except Exception as e:
-        logger.warning(f"No se pudieron leer las pistas del video: {e}")
-        return
+        if tracks:
+            return list(tracks)
+    except Exception:
+        pass
+    return []
 
+
+def _log_pistas_vlc(tracks):
+    """Registra pistas obtenidas vía VLC. Devuelve True si logueó alguna."""
     if not tracks:
-        logger.warning("Sin pistas detectadas en el video.")
-        return
+        return False
 
+    logueado = False
     for track in tracks:
         codec = vlc.libvlc_media_get_codec_description(track.type, track.codec)
         if track.type == vlc.TrackType.video:
@@ -193,6 +249,7 @@ def registrar_info_video(media, path):
                 )
             else:
                 logger.info(f"Pista video: {codec}")
+            logueado = True
         elif track.type == vlc.TrackType.audio:
             at = _puntero_struct(track.u.audio)
             if at and at.rate:
@@ -201,6 +258,117 @@ def registrar_info_video(media, path):
                 )
             else:
                 logger.info(f"Pista audio: {codec}")
+            logueado = True
+    return logueado
+
+
+def _log_pistas_reproductor(player):
+    """Fallback: dimensiones y fps desde el reproductor en reproducción."""
+    try:
+        ancho = player.video_get_width()
+        alto = player.video_get_height()
+        if ancho > 0 and alto > 0:
+            fps = player.get_fps() or 0.0
+            logger.info(
+                f"Pista video: {ancho}x{alto} @ {fps:.2f} fps (desde reproductor)"
+            )
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _fps_desde_ffprobe(valor):
+    if not valor or "/" not in valor:
+        return 0.0
+    num, den = valor.split("/", 1)
+    try:
+        num_i = int(num)
+        den_i = int(den)
+        return num_i / den_i if den_i else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _log_ffprobe(path):
+    """Fallback con ffprobe si está instalado. Devuelve True si logueó datos."""
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_format", "-show_streams", path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return False
+
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return False
+
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return False
+
+    logueado = False
+    fmt = data.get("format", {})
+    duracion_s = float(fmt.get("duration", 0) or 0)
+    if duracion_s > 0:
+        ms = int(duracion_s * 1000)
+        logger.info(f"Duración: {ms} ms ({formatear_duracion(ms)}) [ffprobe]")
+        logueado = True
+
+    for stream in data.get("streams", []):
+        tipo = stream.get("codec_type")
+        codec = (stream.get("codec_name") or "?").upper()
+        if tipo == "video":
+            ancho = stream.get("width")
+            alto = stream.get("height")
+            fps = _fps_desde_ffprobe(stream.get("r_frame_rate"))
+            logger.info(
+                f"Pista video: {codec} {ancho}x{alto} @ {fps:.2f} fps [ffprobe]"
+            )
+            logueado = True
+        elif tipo == "audio":
+            rate = stream.get("sample_rate", "?")
+            canales = stream.get("channels", "?")
+            logger.info(
+                f"Pista audio: {codec} {rate} Hz, {canales} canales [ffprobe]"
+            )
+            logueado = True
+    return logueado
+
+
+def registrar_info_video(media, path, player):
+    """Registra duración y especificaciones del video en los logs."""
+    logger.info(f"Video: {path}")
+
+    _esperar_parse_media(media)
+    _esperar_reproduccion_lista(player)
+
+    duracion = _duracion_ms(media, player)
+    tiene_duracion = duracion > 0
+    if tiene_duracion:
+        logger.info(
+            f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
+        )
+
+    tiene_pistas = _log_pistas_vlc(_leer_pistas_vlc(media))
+    if not tiene_pistas:
+        tiene_pistas = _log_pistas_reproductor(player)
+
+    if not tiene_duracion or not tiene_pistas:
+        if _log_ffprobe(path):
+            return
+
+    if not tiene_duracion:
+        logger.warning("Duración del video no disponible.")
+    if not tiene_pistas:
+        logger.warning("Sin pistas detectadas en el video.")
 
 
 config = cargar_config()
@@ -268,11 +436,6 @@ try:
     media.add_option(":aout=alsa")
     media.add_option(f":alsa-audio-device={alsa_device}")
     player.set_media(media)
-
-    parse_ok = media.parse_with_options(vlc.MediaParseFlag.local, 10000)
-    if parse_ok != 0:
-        logger.warning("VLC no pudo parsear el video por completo; metadatos parciales.")
-    registrar_info_video(media, PATH_VIDEO)
 
     logger.info(f"VLC inicializado con el video: {PATH_VIDEO}")
     logger.info(f"Audio: {audio_etiqueta} ({alsa_device})")
@@ -410,6 +573,7 @@ boton_reinicio.when_released = reiniciar_video_al_soltar
 
 logger.info("Iniciando reproducción...")
 player.play()
+registrar_info_video(media, PATH_VIDEO, player)
 
 try:
     while True:
