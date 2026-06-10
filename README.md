@@ -38,7 +38,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 
 ```bash
 sudo apt update
-sudo apt install -y vlc python3-vlc python3-lgpio git
+sudo apt install -y vlc python3-vlc python3-lgpio ffmpeg git
 sudo usermod -aG video,render,input,gpio video1
 ```
 
@@ -224,6 +224,10 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v1.3.4 (2026-06-09)
+
+- Fix: eliminado parse/tracks VLC que causaba segmentation fault en Pi; metadatos vía ffprobe o reproductor.
 
 ### v1.3.3 (2026-06-09)
 

@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.3"""
-__version__ = "1.3.3"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.4"""
+__version__ = "1.3.4"
 
 import json
 import os
@@ -153,127 +153,18 @@ def formatear_duracion(ms):
     return f"{minutos}:{segundos:02d}"
 
 
-def _puntero_struct(puntero):
-    """Resuelve POINTER(ctypes.Structure) a su contenido."""
-    if puntero is None:
-        return None
-    if hasattr(puntero, "contents"):
-        return puntero.contents
-    if hasattr(puntero, "width") or hasattr(puntero, "rate"):
-        return puntero
-    try:
-        return puntero[0]
-    except (TypeError, IndexError):
-        return None
-
-
-def _track_substruct(track, nombre):
-    """Obtiene video/audio del track (API varía según versión de python-vlc)."""
-    if hasattr(track, nombre):
-        return _puntero_struct(getattr(track, nombre))
-    union = getattr(track, "u", None)
-    if union is not None and hasattr(union, nombre):
-        return _puntero_struct(getattr(union, nombre))
-    return None
-
-
-PARSE_TIMEOUT_MS = 10000
 METADATA_WAIT_S = 3.0
 
 
-def _parsear_media_aislada(path, timeout_ms=PARSE_TIMEOUT_MS):
-    """Parsea una copia del archivo sin interferir con el reproductor activo."""
+def _duracion_reproductor(player):
+    """Obtiene duración desde el reproductor activo."""
     try:
-        probe = vlc.Instance()
-        media_probe = probe.media_new(path)
-        flags = vlc.MediaParseFlag.fetch_local
-        if media_probe.parse_with_options(flags, timeout_ms) == -1:
-            media_probe.parse()
-        deadline = time.monotonic() + timeout_ms / 1000
-        while time.monotonic() < deadline:
-            status = media_probe.get_parsed_status()
-            if status == vlc.MediaParsedStatus.done:
-                break
-            if status in (
-                vlc.MediaParsedStatus.failed,
-                vlc.MediaParsedStatus.timeout,
-            ):
-                break
-            time.sleep(0.05)
-        return media_probe
-    except Exception:
-        return None
-
-
-def _duracion_ms(media, player):
-    """Obtiene duración desde media o reproductor."""
-    fuentes = []
-    if media is not None:
-        fuentes.append(media.get_duration)
-    fuentes.append(player.get_length)
-    for fuente in fuentes:
-        try:
-            ms = fuente()
-            if ms and ms > 0:
-                return ms
-        except Exception:
-            pass
-    return -1
-
-
-def _leer_pistas_vlc(media):
-    """Lee pistas del medio; devuelve lista vacía si no hay soporte."""
-    try:
-        tracks = media.tracks_get()
-        if tracks:
-            return list(tracks)
+        ms = player.get_length()
+        if ms and ms > 0:
+            return ms
     except Exception:
         pass
-    return []
-
-
-def _log_pistas_vlc(tracks):
-    """Registra pistas obtenidas vía VLC. Devuelve True si logueó alguna."""
-    if not tracks:
-        return False
-
-    logueado = False
-    for track in tracks:
-        try:
-            codec = vlc.libvlc_media_get_codec_description(track.type, track.codec)
-            if track.type == vlc.TrackType.video:
-                vt = _track_substruct(track, "video")
-                if vt and vt.width and vt.height:
-                    fps = (
-                        vt.frame_rate_num / vt.frame_rate_den
-                        if vt.frame_rate_den
-                        else 0.0
-                    )
-                    logger.info(
-                        f"Pista video: {codec} {vt.width}x{vt.height} @ {fps:.2f} fps"
-                    )
-                else:
-                    logger.info(f"Pista video: {codec}")
-                logueado = True
-            elif track.type == vlc.TrackType.audio:
-                at = _track_substruct(track, "audio")
-                if at and at.rate:
-                    logger.info(
-                        f"Pista audio: {codec} {at.rate} Hz, {at.channels} canales"
-                    )
-                else:
-                    logger.info(f"Pista audio: {codec}")
-                logueado = True
-        except Exception as e:
-            logger.debug(f"Pista no legible ({_nombre_track(track)}): {e}")
-    return logueado
-
-
-def _nombre_track(track):
-    try:
-        return track.type
-    except Exception:
-        return "?"
+    return -1
 
 
 def _log_pistas_reproductor(player):
@@ -358,27 +249,16 @@ def _log_ffprobe(path):
 
 
 def _recolectar_y_loguear_metadatos(path, player):
-    """Registra metadatos sin bloquear ni tocar el media del reproductor."""
+    """Registra metadatos sin tocar ctypes/VLC extra (evita segfault en Pi)."""
     logger.info(f"Video: {path}")
 
     if _log_ffprobe(path):
         return
 
-    media_probe = _parsear_media_aislada(path)
     tiene_duracion = False
-    tiene_pistas = False
-    if media_probe is not None:
-        duracion = media_probe.get_duration()
-        if duracion > 0:
-            logger.info(
-                f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
-            )
-            tiene_duracion = True
-        tiene_pistas = _log_pistas_vlc(_leer_pistas_vlc(media_probe))
-
     deadline = time.monotonic() + METADATA_WAIT_S
-    while time.monotonic() < deadline and not tiene_duracion:
-        duracion = _duracion_ms(None, player)
+    while time.monotonic() < deadline:
+        duracion = _duracion_reproductor(player)
         if duracion > 0:
             logger.info(
                 f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
@@ -387,13 +267,15 @@ def _recolectar_y_loguear_metadatos(path, player):
             break
         time.sleep(0.1)
 
-    if not tiene_pistas:
-        tiene_pistas = _log_pistas_reproductor(player)
+    tiene_pistas = _log_pistas_reproductor(player)
 
     if not tiene_duracion:
         logger.warning("Duración del video no disponible.")
     if not tiene_pistas:
-        logger.warning("Sin pistas detectadas en el video.")
+        logger.warning(
+            "Especificaciones de pistas no disponibles. "
+            "Instalá ffmpeg para logs completos: sudo apt install -y ffmpeg"
+        )
 
 
 def iniciar_log_metadatos_en_background(path, player):
