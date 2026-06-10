@@ -1,0 +1,14 @@
+{
+  "video": {
+    "path": "/media/video1.mp4"
+  },
+  "loop_corto": {
+    "inicio_ms": 14000,
+    "fin_ms": 14500
+  },
+  "loop_principal": {
+    "inicio_ms": 20,
+    "fin_ms": 0,
+    "margen_antes_fin_ms": 400
+  }
+}

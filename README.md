@@ -1,10 +1,10 @@
-# video-player v1.2
+# video-player v1.3
 
 Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por GPIO (tramo corto y reinicio), arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 1.2 — Resumen
+## Versión 1.3 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
@@ -13,7 +13,8 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 | Video | `/media/video1.mp4` |
 | Loop corto | 14,0 s → 14,5 s (toggle GPIO23) |
 | Reinicio GPIO24 | Seek a 20 ms |
-| Loop principal | Reinicio anticipado en `REINICIO_LOOP_MS` (sin esperar al final) |
+| Loop principal | Reinicio anticipado en `loop_principal.fin_ms` (sin esperar al final) |
+| Configuración | `config.json` (ruta del video + tiempos de loop) |
 | Audio | `hdmi` (default) o `externa` (`AUDIO_SALIDA`) |
 | Servicio | `video-control.service` → `multi-user.target` |
 
@@ -25,6 +26,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por 
 - Loop principal: al llegar a `REINICIO_LOOP_MS` vuelve a `RESTART_MS` antes del final (evita pantalla negra del buffer).
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
 - Log en `control.log` dentro del directorio del proyecto.
+- Al arrancar, registra duración y especificaciones del video (codec, resolución, fps, audio).
 - **Audio:** salida por **HDMI** o **placa externa** (USB/HAT) vía ALSA, configurable.
 
 ## Requisitos
@@ -91,18 +93,59 @@ El unit (`deploy/video-control.service`) arranca sin escritorio: espera `/dev/dr
 
 ## Configuración
 
-Editar constantes al inicio de `video_control.py`:
+### `config.json`
 
-| Constante | Default | Descripción |
-|-----------|---------|-------------|
-| `PATH_VIDEO` | `/media/video1.mp4` | Archivo de video |
+Editar `config.json` en el directorio del proyecto:
+
+```json
+{
+  "video": {
+    "path": "/media/video1.mp4"
+  },
+  "loop_corto": {
+    "inicio_ms": 14000,
+    "fin_ms": 14500
+  },
+  "loop_principal": {
+    "inicio_ms": 20,
+    "fin_ms": 0,
+    "margen_antes_fin_ms": 400
+  }
+}
+```
+
+| Campo | Default | Descripción |
+|-------|---------|-------------|
+| `video.path` | `/media/video1.mp4` | Archivo de video |
+| `loop_corto.inicio_ms` | `14000` | Inicio del tramo GPIO23 (ms) |
+| `loop_corto.fin_ms` | `14500` | Fin del tramo GPIO23 (ms) |
+| `loop_principal.inicio_ms` | `20` | Posición de reinicio (GPIO24 y loop principal) |
+| `loop_principal.fin_ms` | `0` | Umbral de reinicio anticipado; `0` = duración − margen |
+| `loop_principal.margen_antes_fin_ms` | `400` | Margen antes del final si `fin_ms` es `0` |
+
+Ruta alternativa del archivo: variable de entorno `CONFIG_PATH`.
+
+Tras cambios en `config.json`: `sudo systemctl restart video-control.service`.
+
+### Logs al arranque
+
+Al iniciar el servicio, `control.log` y journalctl muestran la config cargada y las especificaciones del video:
+
+```
+INFO - Config cargada: video=/media/video1.mp4 | loop corto 14000-14500 ms | reinicio a 20 ms | umbral fin auto (margen 400 ms)
+INFO - Video: /media/video1.mp4
+INFO - Duración: 180432 ms (3:00)
+INFO - Pista video: HEVC 3840x2160 @ 30.00 fps
+INFO - Pista audio: MPEG AAC 48000 Hz, 2 canales
+INFO - VLC inicializado con el video: /media/video1.mp4
+```
+
+### Audio y GPIO (en `video_control.py` o variables de entorno)
+
+| Constante / variable | Default | Descripción |
+|----------------------|---------|-------------|
 | `GPIO_LOOP` | `23` | Pin loop |
 | `GPIO_REINICIO` | `24` | Pin reinicio |
-| `INICIO_LOOP_MS` | `14000` | Inicio del tramo (ms) |
-| `FIN_LOOP_MS` | `14500` | Fin del tramo (ms) |
-| `RESTART_MS` | `20` | Posición de reinicio (ms) |
-| `REINICIO_LOOP_MS` | `0` | Tiempo (ms) para reiniciar el loop principal; `0` = fin del archivo − margen |
-| `MARGEN_ANTES_FIN_MS` | `400` | Margen antes del final si `REINICIO_LOOP_MS = 0` |
 | `AUDIO_SALIDA` | `hdmi` | `hdmi` o `externa` |
 | `ALSA_HDMI` | `plughw:CARD=vc4hdmi0,DEV=0` | Dispositivo ALSA para HDMI |
 | `ALSA_EXTERNA` | `plughw:1,0` | Dispositivo ALSA para placa externa |
@@ -155,10 +198,10 @@ Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4
 
 ## Cómo funciona el reinicio
 
-- **Loop principal:** cuando `get_time() >= REINICIO_LOOP_MS`, hace `set_time(RESTART_MS)` sin esperar al final del MP4 (evita el negro del buffer).
-- Con `REINICIO_LOOP_MS = 0`, el umbral se calcula solo: `duración del video − MARGEN_ANTES_FIN_MS`.
+- **Loop principal:** cuando `get_time() >= loop_principal.fin_ms`, hace `set_time(loop_principal.inicio_ms)` sin esperar al final del MP4 (evita el negro del buffer).
+- Con `loop_principal.fin_ms = 0`, el umbral se calcula solo: `duración del video − margen_antes_fin_ms`.
 - **GPIO24 / seek manual:** `ir_a_tiempo(ms)` — seek rápido; si VLC está `Ended`, `stop()` breve y `play()`.
-- **Respaldo:** si igual llega a `Ended`, reinicio con `ir_a_tiempo(RESTART_MS)`.
+- **Respaldo:** si igual llega a `Ended`, reinicio con `ir_a_tiempo(loop_principal.inicio_ms)`.
 
 VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`).
 
@@ -166,8 +209,9 @@ VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`).
 
 ```
 video-player/
-├── video_control.py      # Programa principal (v1.1)
-├── VERSION               # 1.1.0
+├── video_control.py      # Programa principal (v1.3)
+├── config.json           # Ruta del video y tiempos de loop
+├── VERSION               # 1.3.0
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -180,6 +224,12 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v1.3.0 (2026-06-09)
+
+- Configuración en `config.json`: ruta del video, loop corto y loop principal.
+- Al arrancar, log de duración y especificaciones del video (codec, resolución, fps, audio).
+- Variable de entorno `CONFIG_PATH` para ruta alternativa del JSON.
 
 ### v1.2.0 (2026-06-04)
 
