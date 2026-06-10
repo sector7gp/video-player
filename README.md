@@ -225,6 +225,10 @@ video-player/
 
 ## Changelog
 
+### v1.3.3 (2026-06-09)
+
+- Fix: lectura de pistas VLC compatible con python-vlc de Raspberry Pi (`track.video` sin `.u`).
+
 ### v1.3.2 (2026-06-09)
 
 - Fix: metadatos en hilo aparte; ya no se parsea el media activo (evita que el video no arranque).

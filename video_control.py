@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.2"""
-__version__ = "1.3.2"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.3"""
+__version__ = "1.3.3"
 
 import json
 import os
@@ -157,7 +157,24 @@ def _puntero_struct(puntero):
     """Resuelve POINTER(ctypes.Structure) a su contenido."""
     if puntero is None:
         return None
-    return puntero.contents if hasattr(puntero, "contents") else puntero[0]
+    if hasattr(puntero, "contents"):
+        return puntero.contents
+    if hasattr(puntero, "width") or hasattr(puntero, "rate"):
+        return puntero
+    try:
+        return puntero[0]
+    except (TypeError, IndexError):
+        return None
+
+
+def _track_substruct(track, nombre):
+    """Obtiene video/audio del track (API varía según versión de python-vlc)."""
+    if hasattr(track, nombre):
+        return _puntero_struct(getattr(track, nombre))
+    union = getattr(track, "u", None)
+    if union is not None and hasattr(union, nombre):
+        return _puntero_struct(getattr(union, nombre))
+    return None
 
 
 PARSE_TIMEOUT_MS = 10000
@@ -222,31 +239,41 @@ def _log_pistas_vlc(tracks):
 
     logueado = False
     for track in tracks:
-        codec = vlc.libvlc_media_get_codec_description(track.type, track.codec)
-        if track.type == vlc.TrackType.video:
-            vt = _puntero_struct(track.u.video)
-            if vt and vt.width and vt.height:
-                fps = (
-                    vt.frame_rate_num / vt.frame_rate_den
-                    if vt.frame_rate_den
-                    else 0.0
-                )
-                logger.info(
-                    f"Pista video: {codec} {vt.width}x{vt.height} @ {fps:.2f} fps"
-                )
-            else:
-                logger.info(f"Pista video: {codec}")
-            logueado = True
-        elif track.type == vlc.TrackType.audio:
-            at = _puntero_struct(track.u.audio)
-            if at and at.rate:
-                logger.info(
-                    f"Pista audio: {codec} {at.rate} Hz, {at.channels} canales"
-                )
-            else:
-                logger.info(f"Pista audio: {codec}")
-            logueado = True
+        try:
+            codec = vlc.libvlc_media_get_codec_description(track.type, track.codec)
+            if track.type == vlc.TrackType.video:
+                vt = _track_substruct(track, "video")
+                if vt and vt.width and vt.height:
+                    fps = (
+                        vt.frame_rate_num / vt.frame_rate_den
+                        if vt.frame_rate_den
+                        else 0.0
+                    )
+                    logger.info(
+                        f"Pista video: {codec} {vt.width}x{vt.height} @ {fps:.2f} fps"
+                    )
+                else:
+                    logger.info(f"Pista video: {codec}")
+                logueado = True
+            elif track.type == vlc.TrackType.audio:
+                at = _track_substruct(track, "audio")
+                if at and at.rate:
+                    logger.info(
+                        f"Pista audio: {codec} {at.rate} Hz, {at.channels} canales"
+                    )
+                else:
+                    logger.info(f"Pista audio: {codec}")
+                logueado = True
+        except Exception as e:
+            logger.debug(f"Pista no legible ({_nombre_track(track)}): {e}")
     return logueado
+
+
+def _nombre_track(track):
+    try:
+        return track.type
+    except Exception:
+        return "?"
 
 
 def _log_pistas_reproductor(player):
