@@ -225,6 +225,10 @@ video-player/
 
 ## Changelog
 
+### v1.3.2 (2026-06-09)
+
+- Fix: metadatos en hilo aparte; ya no se parsea el media activo (evita que el video no arranque).
+
 ### v1.3.1 (2026-06-09)
 
 - Fix: metadatos del video al arranque (parse `fetch_local`, lectura tras `play()`, fallback ffprobe).

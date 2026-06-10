@@ -1,10 +1,11 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.1"""
-__version__ = "1.3.1"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.2"""
+__version__ = "1.3.2"
 
 import json
 import os
 import subprocess
 import sys
+import threading
 import vlc
 import time
 import logging
@@ -159,55 +160,41 @@ def _puntero_struct(puntero):
     return puntero.contents if hasattr(puntero, "contents") else puntero[0]
 
 
-PARSE_TIMEOUT_MS = 15000
-METADATA_WAIT_S = 8.0
+PARSE_TIMEOUT_MS = 10000
+METADATA_WAIT_S = 3.0
 
 
-def _esperar_parse_media(media, timeout_ms=PARSE_TIMEOUT_MS):
-    """Parsea el medio y espera a que VLC termine de leer metadatos."""
-    flags = vlc.MediaParseFlag.fetch_local
+def _parsear_media_aislada(path, timeout_ms=PARSE_TIMEOUT_MS):
+    """Parsea una copia del archivo sin interferir con el reproductor activo."""
     try:
-        if media.parse_with_options(flags, timeout_ms) == -1:
-            media.parse()
-    except Exception:
-        try:
-            media.parse()
-        except Exception:
-            pass
-
-    deadline = time.monotonic() + timeout_ms / 1000
-    while time.monotonic() < deadline:
-        try:
-            status = media.get_parsed_status()
+        probe = vlc.Instance()
+        media_probe = probe.media_new(path)
+        flags = vlc.MediaParseFlag.fetch_local
+        if media_probe.parse_with_options(flags, timeout_ms) == -1:
+            media_probe.parse()
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            status = media_probe.get_parsed_status()
             if status == vlc.MediaParsedStatus.done:
-                return
+                break
             if status in (
                 vlc.MediaParsedStatus.failed,
                 vlc.MediaParsedStatus.timeout,
             ):
-                return
-        except Exception:
-            return
-        time.sleep(0.05)
-
-
-def _esperar_reproduccion_lista(player, timeout_s=METADATA_WAIT_S):
-    """Espera a que VLC reporte duración tras iniciar la reproducción."""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if player.get_length() > 0:
-            return True
-        if player.get_state() in (vlc.State.Playing, vlc.State.Paused):
-            time.sleep(0.15)
-            if player.get_length() > 0:
-                return True
-        time.sleep(0.1)
-    return player.get_length() > 0
+                break
+            time.sleep(0.05)
+        return media_probe
+    except Exception:
+        return None
 
 
 def _duracion_ms(media, player):
     """Obtiene duración desde media o reproductor."""
-    for fuente in (media.get_duration, player.get_length):
+    fuentes = []
+    if media is not None:
+        fuentes.append(media.get_duration)
+    fuentes.append(player.get_length)
+    for fuente in fuentes:
         try:
             ms = fuente()
             if ms and ms > 0:
@@ -343,32 +330,57 @@ def _log_ffprobe(path):
     return logueado
 
 
-def registrar_info_video(media, path, player):
-    """Registra duración y especificaciones del video en los logs."""
+def _recolectar_y_loguear_metadatos(path, player):
+    """Registra metadatos sin bloquear ni tocar el media del reproductor."""
     logger.info(f"Video: {path}")
 
-    _esperar_parse_media(media)
-    _esperar_reproduccion_lista(player)
+    if _log_ffprobe(path):
+        return
 
-    duracion = _duracion_ms(media, player)
-    tiene_duracion = duracion > 0
-    if tiene_duracion:
-        logger.info(
-            f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
-        )
+    media_probe = _parsear_media_aislada(path)
+    tiene_duracion = False
+    tiene_pistas = False
+    if media_probe is not None:
+        duracion = media_probe.get_duration()
+        if duracion > 0:
+            logger.info(
+                f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
+            )
+            tiene_duracion = True
+        tiene_pistas = _log_pistas_vlc(_leer_pistas_vlc(media_probe))
 
-    tiene_pistas = _log_pistas_vlc(_leer_pistas_vlc(media))
+    deadline = time.monotonic() + METADATA_WAIT_S
+    while time.monotonic() < deadline and not tiene_duracion:
+        duracion = _duracion_ms(None, player)
+        if duracion > 0:
+            logger.info(
+                f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
+            )
+            tiene_duracion = True
+            break
+        time.sleep(0.1)
+
     if not tiene_pistas:
         tiene_pistas = _log_pistas_reproductor(player)
-
-    if not tiene_duracion or not tiene_pistas:
-        if _log_ffprobe(path):
-            return
 
     if not tiene_duracion:
         logger.warning("Duración del video no disponible.")
     if not tiene_pistas:
         logger.warning("Sin pistas detectadas en el video.")
+
+
+def iniciar_log_metadatos_en_background(path, player):
+    """Lanza la lectura de metadatos en un hilo aparte para no frenar play()."""
+
+    def trabajo():
+        try:
+            _recolectar_y_loguear_metadatos(path, player)
+        except Exception as e:
+            logger.warning(f"Error al leer metadatos del video: {e}")
+
+    threading.Thread(
+        target=trabajo, daemon=True, name="metadatos-video"
+    ).start()
 
 
 config = cargar_config()
@@ -573,7 +585,7 @@ boton_reinicio.when_released = reiniciar_video_al_soltar
 
 logger.info("Iniciando reproducción...")
 player.play()
-registrar_info_video(media, PATH_VIDEO, player)
+iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
 try:
     while True:
