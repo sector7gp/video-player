@@ -2,13 +2,13 @@
   "video": {
     "path": "/media/video1.mp4"
   },
-  "loop_corto": {
-    "inicio_ms": 14000,
-    "fin_ms": 14500
+  "cuepoints": {
+    "cue1_ms": 20,
+    "cue2_ms": 12000,
+    "cue3_ms": 14000,
+    "cue4_ms": 14500,
+    "cue5_ms": 16000,
+    "cue6_ms": 200000
   },
-  "loop_principal": {
-    "inicio_ms": 20,
-    "fin_ms": 0,
-    "margen_antes_fin_ms": 400
-  }
+  "timer_minutos": 5
 }

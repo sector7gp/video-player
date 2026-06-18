@@ -1,32 +1,54 @@
-# video-player v1.3
+# video-player v2.0
 
-Reproductor de video para **Raspberry Pi 5**: VLC en loop continuo, control por GPIO (tramo corto y reinicio), arranque automático con systemd. Pensado para kiosk con HDMI.
+Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 1.3 — Resumen
+## Versión 2.0 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
 | Plataforma | Raspberry Pi 5, `lgpio` (chip 0) |
 | Proyecto en la Pi | `/home/video1/video-player` |
 | Video | `/media/video1.mp4` |
-| Loop corto | 14,0 s → 14,5 s (toggle GPIO23) |
-| Reinicio GPIO24 | Seek a 20 ms |
-| Loop principal | Reinicio anticipado en `loop_principal.fin_ms` (sin esperar al final) |
-| Configuración | `config.json` (ruta del video + tiempos de loop) |
+| Arranque | Loop presentación **CUE1 → CUE2** |
+| Botón1 (GPIO23) | Inicia timer + loop **CUE3 → CUE4**; 2.ª pulsación → **CUE4 → CUE5** |
+| Timer | `timer_minutos` en `config.json`; al vencer → salta a **CUE6** |
+| Botón2 (GPIO24) | Siempre vuelve a **CUE1** (presentación) |
+| Configuración | `config.json` (cuepoints + timer) |
 | Audio | `hdmi` (default) o `externa` (`AUDIO_SALIDA`) |
 | Servicio | `video-control.service` → `multi-user.target` |
+
+## Flujo de estados
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    Presentacion: Presentación\nloop CUE1-CUE2
+    SesionA: Sesión A\nloop CUE3-CUE4
+    SesionB: Sesión B\nloop CUE4-CUE5
+    Finale: Finale\nCUE6 hasta el fin
+
+    Presentacion --> SesionA: Botón1
+    SesionA --> SesionB: Botón1 dentro del timer
+    SesionA --> Finale: Timer vence
+    SesionB --> Finale: Timer vence
+    Finale --> Presentacion: Fin del video
+    Presentacion --> Presentacion: Botón2
+    SesionA --> Presentacion: Botón2
+    SesionB --> Presentacion: Botón2
+    Finale --> Presentacion: Botón2
+```
 
 ## Características
 
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
-- **GPIO23** — pulsar y soltar: activa/desactiva loop en el tramo; al desactivar restaura la posición guardada.
-- **GPIO24** — pulsar y soltar: reinicio rápido a `RESTART_MS` (20 ms).
-- Loop principal: al llegar a `REINICIO_LOOP_MS` vuelve a `RESTART_MS` antes del final (evita pantalla negra del buffer).
+- **Presentación al arrancar:** loop entre `cue1_ms` y `cue2_ms`.
+- **Botón1 (GPIO23):** inicia timer de `timer_minutos`; loop **CUE3–CUE4**. Segunda pulsación dentro del timer → loop **CUE4–CUE5**.
+- **Timer:** al completarse salta a `cue6_ms` y reproduce hasta el final; luego vuelve a presentación.
+- **Botón2 (GPIO24):** en cualquier momento seek a `cue1_ms` y cancela el timer.
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
-- Log en `control.log` dentro del directorio del proyecto.
-- Al arrancar, registra duración y especificaciones del video (codec, resolución, fps, audio).
+- Log en `control.log`; metadatos del video vía ffprobe al arrancar.
 - **Audio:** salida por **HDMI** o **placa externa** (USB/HAT) vía ALSA, configurable.
 
 ## Requisitos
@@ -60,8 +82,8 @@ sudo reboot
 
 | GPIO | Función |
 |------|---------|
-| **23** | Toggle loop 14 s – 14,5 s |
-| **24** | Reinicio al inicio (20 ms) |
+| **23** | Botón1 — sesión / escala loop |
+| **24** | Botón2 — vuelve a CUE1 (presentación) |
 
 Conexión: un lado del botón al GPIO, el otro a **GND**.
 
@@ -78,8 +100,8 @@ python3 video_control.py
 
 | Botón | Acción |
 |-------|--------|
-| GPIO23 | Pulsar y soltar → entra/sale del loop corto |
-| GPIO24 | Pulsar y soltar → vuelve a 20 ms del video |
+| GPIO23 (botón1) | En presentación: inicia timer + loop CUE3–CUE4. En sesión A (timer activo): loop CUE4–CUE5 |
+| GPIO24 (botón2) | Siempre: vuelve a CUE1 y cancela timer |
 
 ### Servicio systemd
 
@@ -102,26 +124,30 @@ Editar `config.json` en el directorio del proyecto:
   "video": {
     "path": "/media/video1.mp4"
   },
-  "loop_corto": {
-    "inicio_ms": 14000,
-    "fin_ms": 14500
+  "cuepoints": {
+    "cue1_ms": 20,
+    "cue2_ms": 12000,
+    "cue3_ms": 14000,
+    "cue4_ms": 14500,
+    "cue5_ms": 16000,
+    "cue6_ms": 200000
   },
-  "loop_principal": {
-    "inicio_ms": 20,
-    "fin_ms": 0,
-    "margen_antes_fin_ms": 400
-  }
+  "timer_minutos": 5
 }
 ```
 
-| Campo | Default | Descripción |
-|-------|---------|-------------|
-| `video.path` | `/media/video1.mp4` | Archivo de video |
-| `loop_corto.inicio_ms` | `14000` | Inicio del tramo GPIO23 (ms) |
-| `loop_corto.fin_ms` | `14500` | Fin del tramo GPIO23 (ms) |
-| `loop_principal.inicio_ms` | `20` | Posición de reinicio (GPIO24 y loop principal) |
-| `loop_principal.fin_ms` | `0` | Umbral de reinicio anticipado; `0` = duración − margen |
-| `loop_principal.margen_antes_fin_ms` | `400` | Margen antes del final si `fin_ms` es `0` |
+| Campo | Descripción |
+|-------|-------------|
+| `video.path` | Archivo de video |
+| `cuepoints.cue1_ms` | Inicio presentación (loop con CUE2) |
+| `cuepoints.cue2_ms` | Fin presentación |
+| `cuepoints.cue3_ms` | Inicio loop sesión A (con CUE4) |
+| `cuepoints.cue4_ms` | Fin sesión A / inicio sesión B |
+| `cuepoints.cue5_ms` | Fin loop sesión B |
+| `cuepoints.cue6_ms` | Salto al vencer el timer |
+| `timer_minutos` | Duración del timer tras botón1 |
+
+Los cuepoints deben ser **estrictamente crecientes**: CUE1 < CUE2 < … < CUE6.
 
 Ruta alternativa del archivo: variable de entorno `CONFIG_PATH`.
 
@@ -132,27 +158,19 @@ Tras cambios en `config.json`: `sudo systemctl restart video-control.service`.
 Al iniciar el servicio, `control.log` y journalctl muestran la config cargada y las especificaciones del video:
 
 ```
-INFO - Config cargada: video=/media/video1.mp4 | loop corto 14000-14500 ms | reinicio a 20 ms | umbral fin auto (margen 400 ms)
+INFO - Config cargada: video=/media/video1.mp4 | CUE1=20 CUE2=12000 ... | timer=5 min
+INFO - Iniciando reproducción (presentación CUE1-CUE2)...
 INFO - Video: /media/video1.mp4
-INFO - Duración: 180432 ms (3:00)
-INFO - Pista video: HEVC 3840x2160 @ 30.00 fps
-INFO - Pista audio: MPEG AAC 48000 Hz, 2 canales
-INFO - VLC inicializado con el video: /media/video1.mp4
+INFO - Duración: 22356 ms (0:22) [ffprobe]
 ```
 
-### Audio y GPIO (en `video_control.py` o variables de entorno)
+### Audio y GPIO (variables de entorno)
 
-| Constante / variable | Default | Descripción |
-|----------------------|---------|-------------|
-| `GPIO_LOOP` | `23` | Pin loop |
-| `GPIO_REINICIO` | `24` | Pin reinicio |
+| Variable | Default | Descripción |
+|----------|---------|-------------|
 | `AUDIO_SALIDA` | `hdmi` | `hdmi` o `externa` |
 | `ALSA_HDMI` | `plughw:CARD=vc4hdmi0,DEV=0` | Dispositivo ALSA para HDMI |
 | `ALSA_EXTERNA` | `plughw:1,0` | Dispositivo ALSA para placa externa |
-| `DEBOUNCE_TOGGLE_S` | `0.40` | Antirebote software (s) |
-| `PULSO_MINIMO_S` | `0.05` | Pulso mínimo válido (s) |
-
-Tras cambios en el script: `sudo systemctl restart video-control.service`.
 
 ## Audio (HDMI o placa externa)
 
@@ -196,22 +214,21 @@ En `control.log` debe aparecer: `Audio: placa externa (plughw:1,0)`.
 
 Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4hdmi1,DEV=0` en `ALSA_HDMI`.
 
-## Cómo funciona el reinicio
+## Cómo funcionan los loops
 
-- **Loop principal:** cuando `get_time() >= loop_principal.fin_ms`, hace `set_time(loop_principal.inicio_ms)` sin esperar al final del MP4 (evita el negro del buffer).
-- Con `loop_principal.fin_ms = 0`, el umbral se calcula solo: `duración del video − margen_antes_fin_ms`.
-- **GPIO24 / seek manual:** `ir_a_tiempo(ms)` — seek rápido; si VLC está `Ended`, `stop()` breve y `play()`.
-- **Respaldo:** si igual llega a `Ended`, reinicio con `ir_a_tiempo(loop_principal.inicio_ms)`.
-
-VLC se inicializa de forma mínima (`vlc.Instance('--input-repeat=-1')`).
+- **Presentación:** al arrancar, loop `CUE1 → CUE2` hasta que se pulse botón1.
+- **Sesión A:** botón1 inicia el timer y loop `CUE3 → CUE4`.
+- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE4 → CUE5`.
+- **Finale:** timer vencido → seek a `CUE6`; al terminar el video vuelve a presentación.
+- **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 
 ## Estructura del repositorio
 
 ```
 video-player/
-├── video_control.py      # Programa principal (v1.3)
-├── config.json           # Ruta del video y tiempos de loop
-├── VERSION               # 1.3.0
+├── video_control.py      # Programa principal (v2.0)
+├── config.json           # Cuepoints + timer
+├── VERSION               # 2.0.0
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -224,6 +241,13 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.0.0 (2026-06-09)
+
+- Sistema de cuepoints CUE1–CUE6 con presentación, sesión con timer, loops escalonados y finale.
+- Botón1 (GPIO23): inicia sesión / escala a loop CUE4–CUE5.
+- Botón2 (GPIO24): siempre vuelve a CUE1.
+- `config.json`: reemplaza `loop_corto` y `loop_principal` por `cuepoints` + `timer_minutos`.
 
 ### v1.3.4 (2026-06-09)
 

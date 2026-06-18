@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v1.3.4"""
-__version__ = "1.3.4"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.0"""
+__version__ = "2.0.0"
 
 import json
 import os
@@ -35,13 +35,25 @@ logger.info(f"Iniciando video-player v{__version__}...")
 
 CONFIG_DEFAULT = {
     "video": {"path": "/media/video1.mp4"},
-    "loop_corto": {"inicio_ms": 14000, "fin_ms": 14500},
-    "loop_principal": {
-        "inicio_ms": 20,
-        "fin_ms": 0,
-        "margen_antes_fin_ms": 400,
+    "cuepoints": {
+        "cue1_ms": 20,
+        "cue2_ms": 12000,
+        "cue3_ms": 14000,
+        "cue4_ms": 14500,
+        "cue5_ms": 16000,
+        "cue6_ms": 200000,
     },
+    "timer_minutos": 5,
 }
+
+CUE_KEYS = (
+    "cue1_ms",
+    "cue2_ms",
+    "cue3_ms",
+    "cue4_ms",
+    "cue5_ms",
+    "cue6_ms",
+)
 
 
 def _deep_merge(base, override):
@@ -56,18 +68,12 @@ def _deep_merge(base, override):
 
 
 def _log_resumen_config(cfg):
-    loop_corto = cfg["loop_corto"]
-    loop_principal = cfg["loop_principal"]
-    if loop_principal["fin_ms"] > 0:
-        umbral = f"umbral fin {loop_principal['fin_ms']} ms"
-    else:
-        umbral = (
-            f"umbral fin auto (margen {loop_principal['margen_antes_fin_ms']} ms)"
-        )
+    cues = cfg["cuepoints"]
     logger.info(
         f"Config cargada: video={cfg['video']['path']} | "
-        f"loop corto {loop_corto['inicio_ms']}-{loop_corto['fin_ms']} ms | "
-        f"reinicio a {loop_principal['inicio_ms']} ms | {umbral}"
+        f"CUE1={cues['cue1_ms']} CUE2={cues['cue2_ms']} CUE3={cues['cue3_ms']} "
+        f"CUE4={cues['cue4_ms']} CUE5={cues['cue5_ms']} CUE6={cues['cue6_ms']} ms | "
+        f"timer={cfg['timer_minutos']} min"
     )
 
 
@@ -106,38 +112,29 @@ def cargar_config():
         logger.error(f"config.json: el archivo de video no existe: {video_path}")
         sys.exit(1)
 
-    loop_corto = cfg["loop_corto"]
-    inicio_corto = loop_corto.get("inicio_ms")
-    fin_corto = loop_corto.get("fin_ms")
-    if not isinstance(inicio_corto, (int, float)) or not isinstance(
-        fin_corto, (int, float)
-    ):
-        logger.error("config.json: loop_corto.inicio_ms y fin_ms deben ser números.")
-        sys.exit(1)
-    if inicio_corto >= fin_corto:
-        logger.error(
-            f"config.json: loop_corto.inicio_ms ({inicio_corto}) "
-            f"debe ser menor que fin_ms ({fin_corto})."
-        )
-        sys.exit(1)
-
-    loop_principal = cfg["loop_principal"]
-    inicio_principal = loop_principal.get("inicio_ms")
-    fin_principal = loop_principal.get("fin_ms")
-    margen = loop_principal.get("margen_antes_fin_ms")
-    for nombre, valor in (
-        ("loop_principal.inicio_ms", inicio_principal),
-        ("loop_principal.fin_ms", fin_principal),
-        ("loop_principal.margen_antes_fin_ms", margen),
-    ):
+    cues = cfg["cuepoints"]
+    valores_cue = []
+    for key in CUE_KEYS:
+        valor = cues.get(key)
         if not isinstance(valor, (int, float)):
-            logger.error(f"config.json: {nombre} debe ser un número.")
+            logger.error(f"config.json: cuepoints.{key} debe ser un número.")
             sys.exit(1)
-    if inicio_principal < 0 or fin_principal < 0:
-        logger.error("config.json: loop_principal.inicio_ms y fin_ms deben ser >= 0.")
-        sys.exit(1)
-    if margen <= 0:
-        logger.error("config.json: loop_principal.margen_antes_fin_ms debe ser > 0.")
+        if valor < 0:
+            logger.error(f"config.json: cuepoints.{key} debe ser >= 0.")
+            sys.exit(1)
+        valores_cue.append(int(valor))
+
+    for i in range(len(valores_cue) - 1):
+        if valores_cue[i] >= valores_cue[i + 1]:
+            logger.error(
+                f"config.json: los cuepoints deben ser estrictamente crecientes "
+                f"({CUE_KEYS[i]}={valores_cue[i]} >= {CUE_KEYS[i + 1]}={valores_cue[i + 1]})."
+            )
+            sys.exit(1)
+
+    timer_minutos = cfg.get("timer_minutos")
+    if not isinstance(timer_minutos, (int, float)) or timer_minutos <= 0:
+        logger.error("config.json: timer_minutos debe ser un número > 0.")
         sys.exit(1)
 
     _log_resumen_config(cfg)
@@ -294,27 +291,30 @@ def iniciar_log_metadatos_en_background(path, player):
 
 config = cargar_config()
 PATH_VIDEO = config["video"]["path"]
-INICIO_LOOP_MS = int(config["loop_corto"]["inicio_ms"])
-FIN_LOOP_MS = int(config["loop_corto"]["fin_ms"])
-RESTART_MS = int(config["loop_principal"]["inicio_ms"])
-REINICIO_LOOP_MS = int(config["loop_principal"]["fin_ms"])
-MARGEN_ANTES_FIN_MS = int(config["loop_principal"]["margen_antes_fin_ms"])
+CUE1 = int(config["cuepoints"]["cue1_ms"])
+CUE2 = int(config["cuepoints"]["cue2_ms"])
+CUE3 = int(config["cuepoints"]["cue3_ms"])
+CUE4 = int(config["cuepoints"]["cue4_ms"])
+CUE5 = int(config["cuepoints"]["cue5_ms"])
+CUE6 = int(config["cuepoints"]["cue6_ms"])
+TIMER_MINUTOS = float(config["timer_minutos"])
+TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
 
 # GPIO (Raspberry Pi 5, chip 0) — pull-up interno, botón a GND
-GPIO_LOOP = 23       # toggle loop corto
-GPIO_REINICIO = 24   # reinicio rápido al inicio del video
+GPIO_BOTON1 = 23
+GPIO_BOTON2 = 24
 
 # Configuración específica para Raspberry Pi 5
 try:
     factory = LGPIOFactory(chip=0)
-    boton_loop = Button(
-        GPIO_LOOP, pull_up=True, pin_factory=factory, bounce_time=0.05
+    boton1 = Button(
+        GPIO_BOTON1, pull_up=True, pin_factory=factory, bounce_time=0.05
     )
-    boton_reinicio = Button(
-        GPIO_REINICIO, pull_up=True, pin_factory=factory, bounce_time=0.05
+    boton2 = Button(
+        GPIO_BOTON2, pull_up=True, pin_factory=factory, bounce_time=0.05
     )
     logger.info(
-        f"GPIO{GPIO_LOOP} (loop) y GPIO{GPIO_REINICIO} (reinicio) configurados "
+        f"GPIO{GPIO_BOTON1} (botón1) y GPIO{GPIO_BOTON2} (botón2) configurados "
         "con pull-up interno y filtro antirrebote."
     )
 except Exception as e:
@@ -365,196 +365,195 @@ except Exception as e:
     sys.exit(1)
 
 TOLERANCIA_MS = 80
-# Antirebote software: tiempo mínimo entre toggles y pulso válido
-DEBOUNCE_TOGGLE_S = 0.40
+MARGEN_FIN_MS = 400
+DEBOUNCE_BOTON_S = 0.40
 PULSO_MINIMO_S = 0.05
 
-estado_loop_corto = False
-posicion_guardada_ms = None
+MODO_PRESENTACION = "presentacion"
+MODO_SESION_A = "sesion_a"
+MODO_SESION_B = "sesion_b"
+MODO_FINALE = "finale"
+
+modo = MODO_PRESENTACION
+timer_fin = None
 esperando_seek = False
 ultimo_reintento_fin = 0.0
-esperando_seek_principal = False
-umbral_reinicio_cache = None
-momento_presion_loop = 0.0
-ultimo_toggle = 0.0
-ultimo_reinicio_gpio = 0.0
-momento_presion_reinicio = 0.0
+momento_presion_boton1 = 0.0
+momento_presion_boton2 = 0.0
+ultimo_boton1 = 0.0
+ultimo_boton2 = 0.0
+
 
 def asegurar_reproduciendo():
     if player.get_state() != vlc.State.Playing:
         player.play()
 
+
 def ir_a_tiempo(ms):
     """Seek instantáneo; si el video terminó (Ended), stop breve y play."""
+    global esperando_seek
     if player.get_state() in (vlc.State.Ended, vlc.State.Stopped):
         player.stop()
         time.sleep(0.03)
     player.set_time(ms)
     player.play()
-
-def obtener_umbral_reinicio():
-    """Devuelve el tiempo (ms) en el que el loop principal vuelve a RESTART_MS."""
-    global umbral_reinicio_cache
-    if umbral_reinicio_cache is not None:
-        return umbral_reinicio_cache
-    if REINICIO_LOOP_MS > 0:
-        umbral_reinicio_cache = REINICIO_LOOP_MS
-    else:
-        duracion = player.get_length()
-        if duracion > 0:
-            umbral_reinicio_cache = max(
-                RESTART_MS + TOLERANCIA_MS,
-                duracion - MARGEN_ANTES_FIN_MS,
-            )
-            logger.info(
-                f"Reinicio automático del loop principal en {umbral_reinicio_cache} ms "
-                f"(duración {duracion} ms, margen {MARGEN_ANTES_FIN_MS} ms)."
-            )
-        else:
-            umbral_reinicio_cache = None
-    if umbral_reinicio_cache is not None and REINICIO_LOOP_MS > 0:
-        logger.info(f"Reinicio del loop principal en {umbral_reinicio_cache} ms.")
-    return umbral_reinicio_cache
-
-def iniciar_loop():
-    """Toggle ON: guarda posición actual y entra al loop del tramo."""
-    global estado_loop_corto, posicion_guardada_ms, esperando_seek
-    current = player.get_time()
-    posicion_guardada_ms = current if current >= 0 else 0
-    estado_loop_corto = True
     esperando_seek = True
-    ir_a_tiempo(INICIO_LOOP_MS)
-    logger.info(
-        f"Loop ACTIVADO ({INICIO_LOOP_MS}-{FIN_LOOP_MS} ms). "
-        f"Posición guardada: {posicion_guardada_ms} ms."
-    )
 
-def detener_loop():
-    """Toggle OFF: sale del loop y vuelve a la posición guardada."""
-    global estado_loop_corto, esperando_seek
-    estado_loop_corto = False
-    esperando_seek = False
-    if posicion_guardada_ms is not None:
-        ir_a_tiempo(posicion_guardada_ms)
-        logger.info(f"Loop DESACTIVADO. Vuelve a {posicion_guardada_ms} ms.")
 
-def registrar_presion_loop():
-    global momento_presion_loop
-    momento_presion_loop = time.monotonic()
+def _timer_activo():
+    return timer_fin is not None and time.monotonic() < timer_fin
 
-def alternar_loop_al_soltar():
-    """GPIO23: press+release alterna loop ON/OFF (antirebote software)."""
-    global ultimo_toggle
-    ahora = time.monotonic()
-    duracion = ahora - momento_presion_loop
 
+def _iniciar_timer():
+    global timer_fin
+    timer_fin = time.monotonic() + TIMER_SEGUNDOS
+    logger.info(f"Timer iniciado: {TIMER_MINUTOS} min (expira en {TIMER_SEGUNDOS:.0f} s).")
+
+
+def _cancelar_timer():
+    global timer_fin
+    if timer_fin is not None:
+        logger.info("Timer cancelado.")
+    timer_fin = None
+
+
+def _cambiar_modo(nuevo_modo, ms_destino, motivo):
+    global modo, esperando_seek
+    modo = nuevo_modo
+    logger.info(f"Modo → {nuevo_modo} ({motivo}). Seek a {ms_destino} ms.")
+    ir_a_tiempo(ms_destino)
+
+
+def ir_a_presentacion(motivo):
+    _cancelar_timer()
+    _cambiar_modo(MODO_PRESENTACION, CUE1, motivo)
+
+
+def _loop_del_modo():
+    if modo == MODO_PRESENTACION:
+        return CUE1, CUE2
+    if modo == MODO_SESION_A:
+        return CUE3, CUE4
+    if modo == MODO_SESION_B:
+        return CUE4, CUE5
+    return None, None
+
+
+def _verificar_timer_vencido():
+    global modo
+    if modo not in (MODO_SESION_A, MODO_SESION_B):
+        return
+    if timer_fin is None or time.monotonic() < timer_fin:
+        return
+    _cancelar_timer()
+    _cambiar_modo(MODO_FINALE, CUE6, "timer completado")
+
+
+def _gestionar_loop(current_time, state):
+    global esperando_seek, modo, ultimo_reintento_fin
+
+    _verificar_timer_vencido()
+
+    if modo == MODO_FINALE:
+        duracion = player.get_length()
+        umbral_fin = None
+        if duracion > 0:
+            umbral_fin = max(CUE6 + TOLERANCIA_MS, duracion - MARGEN_FIN_MS)
+        if (
+            (umbral_fin is not None and current_time >= 0 and current_time >= umbral_fin)
+            or state == vlc.State.Ended
+        ):
+            ahora = time.monotonic()
+            if ahora - ultimo_reintento_fin >= 0.5:
+                ultimo_reintento_fin = ahora
+                ir_a_presentacion("fin del tramo CUE6")
+        return
+
+    inicio, fin = _loop_del_modo()
+    if inicio is None:
+        return
+
+    if esperando_seek:
+        if current_time >= 0 and current_time <= inicio + TOLERANCIA_MS:
+            esperando_seek = False
+        return
+
+    if current_time < 0:
+        return
+
+    if current_time >= fin:
+        esperando_seek = True
+        player.set_time(inicio)
+
+
+def _pulso_valido(duracion, ultimo, nombre):
     if duracion < PULSO_MINIMO_S:
-        logger.info("GPIO23: pulsación ignorada (demasiado corta, rebote).")
+        logger.info(f"{nombre}: pulsación ignorada (demasiado corta, rebote).")
+        return False
+    if time.monotonic() - ultimo < DEBOUNCE_BOTON_S:
+        logger.info(f"{nombre}: pulsación ignorada (antirebote software).")
+        return False
+    return True
+
+
+def registrar_presion_boton1():
+    global momento_presion_boton1
+    momento_presion_boton1 = time.monotonic()
+
+
+def boton1_al_soltar():
+    """Botón1: inicia sesión / escala loop CUE4-CUE5 si el timer sigue activo."""
+    global ultimo_boton1, modo
+    duracion = time.monotonic() - momento_presion_boton1
+    if not _pulso_valido(duracion, ultimo_boton1, "GPIO23"):
         return
-    if ahora - ultimo_toggle < DEBOUNCE_TOGGLE_S:
-        logger.info("GPIO23: pulsación ignorada (antirebote software).")
-        return
+    ultimo_boton1 = time.monotonic()
 
-    ultimo_toggle = ahora
-    if estado_loop_corto:
-        detener_loop()
-    else:
-        iniciar_loop()
-
-def registrar_presion_reinicio():
-    global momento_presion_reinicio
-    momento_presion_reinicio = time.monotonic()
-
-def reiniciar_video_al_soltar():
-    """GPIO24: press+release → seek rápido a RESTART_MS (sin stop)."""
-    global ultimo_reinicio_gpio, estado_loop_corto, esperando_seek
-    ahora = time.monotonic()
-    duracion = ahora - momento_presion_reinicio
-
-    if duracion < PULSO_MINIMO_S:
-        logger.info("GPIO24: pulsación ignorada (demasiado corta, rebote).")
-        return
-    if ahora - ultimo_reinicio_gpio < DEBOUNCE_TOGGLE_S:
-        logger.info("GPIO24: pulsación ignorada (antirebote software).")
+    if modo == MODO_PRESENTACION:
+        _iniciar_timer()
+        _cambiar_modo(MODO_SESION_A, CUE3, "botón1 en presentación")
         return
 
-    ultimo_reinicio_gpio = ahora
-    if estado_loop_corto:
-        estado_loop_corto = False
-        esperando_seek = False
-        logger.info("GPIO24: loop corto desactivado por reinicio.")
+    if modo == MODO_SESION_A and _timer_activo():
+        _cambiar_modo(MODO_SESION_B, CUE4, "botón1 dentro del timer (CUE4-CUE5)")
+        return
 
-    logger.info(f"GPIO24: reinicio rápido a {RESTART_MS} ms.")
-    ir_a_tiempo(RESTART_MS)
+    if modo == MODO_SESION_B and _timer_activo():
+        logger.info("GPIO23: ya en loop CUE4-CUE5; pulsación ignorada.")
+        return
 
-boton_loop.when_pressed = registrar_presion_loop
-boton_loop.when_released = alternar_loop_al_soltar
-boton_reinicio.when_pressed = registrar_presion_reinicio
-boton_reinicio.when_released = reiniciar_video_al_soltar
+    logger.info(f"GPIO23: pulsación ignorada en modo {modo}.")
 
-logger.info("Iniciando reproducción...")
-player.play()
+
+def registrar_presion_boton2():
+    global momento_presion_boton2
+    momento_presion_boton2 = time.monotonic()
+
+
+def boton2_al_soltar():
+    """Botón2: en cualquier momento vuelve a CUE1 (presentación)."""
+    global ultimo_boton2
+    duracion = time.monotonic() - momento_presion_boton2
+    if not _pulso_valido(duracion, ultimo_boton2, "GPIO24"):
+        return
+    ultimo_boton2 = time.monotonic()
+    ir_a_presentacion("botón2")
+
+
+boton1.when_pressed = registrar_presion_boton1
+boton1.when_released = boton1_al_soltar
+boton2.when_pressed = registrar_presion_boton2
+boton2.when_released = boton2_al_soltar
+
+logger.info("Iniciando reproducción (presentación CUE1-CUE2)...")
+ir_a_tiempo(CUE1)
 iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
 try:
     while True:
         state = player.get_state()
-        
-        # 1. Loop corto mientras el toggle está activo
-        if estado_loop_corto:
-            current_time = player.get_time()
-
-            if esperando_seek:
-                if current_time < 0:
-                    pass
-                elif current_time <= INICIO_LOOP_MS + TOLERANCIA_MS:
-                    esperando_seek = False
-                time.sleep(0.02)
-                continue
-
-            if current_time < 0:
-                time.sleep(0.02)
-                continue
-
-            if current_time >= FIN_LOOP_MS:
-                esperando_seek = True
-                player.set_time(INICIO_LOOP_MS)
-
-        # 2. Loop principal: reinicio anticipado (evita negro al llegar al final real)
-        else:
-            current_time = player.get_time()
-            umbral = obtener_umbral_reinicio()
-
-            if esperando_seek_principal:
-                if current_time < 0:
-                    pass
-                elif current_time <= RESTART_MS + TOLERANCIA_MS:
-                    esperando_seek_principal = False
-                time.sleep(0.02)
-                continue
-
-            if (
-                umbral is not None
-                and current_time >= 0
-                and current_time >= umbral
-            ):
-                esperando_seek_principal = True
-                logger.info(
-                    f"Loop principal: reinicio anticipado ({current_time} ms "
-                    f"≥ {umbral} ms) → {RESTART_MS} ms."
-                )
-                player.set_time(RESTART_MS)
-
-            # Respaldo por si igual llega a Ended (p. ej. umbral mal configurado)
-            elif state == vlc.State.Ended:
-                ahora = time.monotonic()
-                if ahora - ultimo_reintento_fin >= 0.5:
-                    ultimo_reintento_fin = ahora
-                    logger.warning(
-                        f"Video en Ended; reinicio de respaldo a {RESTART_MS} ms."
-                    )
-                    ir_a_tiempo(RESTART_MS)
-
+        current_time = player.get_time()
+        _gestionar_loop(current_time, state)
         time.sleep(0.05)
 
 except KeyboardInterrupt:
