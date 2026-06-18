@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.1"""
-__version__ = "2.0.1"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.2"""
+__version__ = "2.0.2"
 
 import json
 import os
@@ -42,6 +42,7 @@ CONFIG_DEFAULT = {
         "cue4_ms": 14500,
         "cue5_ms": 16000,
         "cue6_ms": 200000,
+        "cue7_ms": 210000,
     },
     "timer_minutos": 5,
 }
@@ -53,6 +54,7 @@ CUE_KEYS = (
     "cue4_ms",
     "cue5_ms",
     "cue6_ms",
+    "cue7_ms",
 )
 
 
@@ -72,7 +74,8 @@ def _log_resumen_config(cfg):
     logger.info(
         f"Config cargada: video={cfg['video']['path']} | "
         f"CUE1={cues['cue1_ms']} CUE2={cues['cue2_ms']} CUE3={cues['cue3_ms']} "
-        f"CUE4={cues['cue4_ms']} CUE5={cues['cue5_ms']} CUE6={cues['cue6_ms']} ms | "
+        f"CUE4={cues['cue4_ms']} CUE5={cues['cue5_ms']} CUE6={cues['cue6_ms']} "
+        f"CUE7={cues['cue7_ms']} ms | "
         f"timer={cfg['timer_minutos']} min"
     )
 
@@ -297,6 +300,7 @@ CUE3 = int(config["cuepoints"]["cue3_ms"])
 CUE4 = int(config["cuepoints"]["cue4_ms"])
 CUE5 = int(config["cuepoints"]["cue5_ms"])
 CUE6 = int(config["cuepoints"]["cue6_ms"])
+CUE7 = int(config["cuepoints"]["cue7_ms"])
 TIMER_MINUTOS = float(config["timer_minutos"])
 TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
 
@@ -365,7 +369,6 @@ except Exception as e:
     sys.exit(1)
 
 TOLERANCIA_MS = 80
-MARGEN_FIN_MS = 400
 DEBOUNCE_BOTON_S = 0.40
 PULSO_MINIMO_S = 0.05
 
@@ -458,18 +461,17 @@ def _gestionar_loop(current_time, state):
     _verificar_timer_vencido()
 
     if modo == MODO_FINALE:
-        duracion = player.get_length()
-        umbral_fin = None
-        if duracion > 0:
-            umbral_fin = max(CUE6 + TOLERANCIA_MS, duracion - MARGEN_FIN_MS)
-        if (
-            (umbral_fin is not None and current_time >= 0 and current_time >= umbral_fin)
-            or state == vlc.State.Ended
-        ):
+        if current_time >= 0 and current_time >= CUE7:
             ahora = time.monotonic()
             if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
-                ir_a_presentacion("fin del tramo CUE6")
+                ir_a_presentacion(f"timer: CUE7 ({CUE7} ms) → reinicio en CUE1")
+        elif state == vlc.State.Ended:
+            ahora = time.monotonic()
+            if ahora - ultimo_reintento_fin >= 0.5:
+                ultimo_reintento_fin = ahora
+                logger.warning("Video en Ended durante finale; reinicio en CUE1.")
+                ir_a_presentacion("fin de video en finale")
         return
 
     inicio, fin = _loop_del_modo()

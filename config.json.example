@@ -8,7 +8,8 @@
     "cue3_ms": 14000,
     "cue4_ms": 14500,
     "cue5_ms": 16000,
-    "cue6_ms": 200000
+    "cue6_ms": 200000,
+    "cue7_ms": 210000
   },
   "timer_minutos": 5
 }
