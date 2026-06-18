@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.2"""
-__version__ = "2.0.2"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.3"""
+__version__ = "2.0.3"
 
 import json
 import os
@@ -438,11 +438,20 @@ def ir_a_presentacion(motivo):
 def _loop_del_modo():
     if modo == MODO_PRESENTACION:
         return CUE1, CUE2
-    if modo == MODO_SESION_A:
+    if modo == MODO_SESION_A and _timer_activo():
         return CUE3, CUE4
-    if modo == MODO_SESION_B:
+    if modo == MODO_SESION_B and _timer_activo():
         return CUE4, CUE5
     return None, None
+
+
+def _seek_completado(current_time, inicio, fin):
+    """True si el seek terminó (cerca del inicio o dentro del tramo del loop)."""
+    if current_time < 0:
+        return False
+    if current_time <= inicio + TOLERANCIA_MS:
+        return True
+    return inicio <= current_time <= fin
 
 
 def _verificar_timer_vencido():
@@ -479,7 +488,7 @@ def _gestionar_loop(current_time, state):
         return
 
     if esperando_seek:
-        if current_time >= 0 and current_time <= inicio + TOLERANCIA_MS:
+        if _seek_completado(current_time, inicio, fin):
             esperando_seek = False
         return
 
@@ -488,6 +497,7 @@ def _gestionar_loop(current_time, state):
 
     if current_time >= fin:
         esperando_seek = True
+        logger.info(f"Loop {modo}: {current_time} ms ≥ {fin} ms → {inicio} ms.")
         player.set_time(inicio)
 
 

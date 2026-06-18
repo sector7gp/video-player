@@ -238,6 +238,10 @@ video-player/
 
 ## Changelog
 
+### v2.0.3 (2026-06-09)
+
+- Fix: loop CUE3–CUE4 (y CUE4–CUE5) con timer activo; seek ya no bloquea el loop al restaurar posición.
+
 ### v2.0.2 (2026-06-09)
 
 - Timer vencido: salta a CUE6; al llegar a CUE7 reinicia en CUE1 (nuevo `cue7_ms`).
