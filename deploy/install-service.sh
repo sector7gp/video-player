@@ -19,6 +19,16 @@ if [[ ! -f "${PROJECT_DIR}/video_control.py" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${PROJECT_DIR}/config.json" ]]; then
+  if [[ -f "${PROJECT_DIR}/config.json.example" ]]; then
+    cp "${PROJECT_DIR}/config.json.example" "${PROJECT_DIR}/config.json"
+    chown "${USER_NAME}:${USER_NAME}" "${PROJECT_DIR}/config.json"
+    echo "Creado ${PROJECT_DIR}/config.json desde config.json.example"
+  else
+    echo "AVISO: no existe config.json ni config.json.example en ${PROJECT_DIR}"
+  fi
+fi
+
 sed "s|/home/video1/video-player|${PROJECT_DIR}|g; s|User=video1|User=${USER_NAME}|g; s|Group=video1|Group=${USER_NAME}|g" \
   "${SERVICE_SRC}" > "${SERVICE_DST}"
 

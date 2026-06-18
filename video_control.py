@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.0"""
-__version__ = "2.0.0"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.1"""
+__version__ = "2.0.1"
 
 import json
 import os
@@ -376,6 +376,7 @@ MODO_FINALE = "finale"
 
 modo = MODO_PRESENTACION
 timer_fin = None
+posicion_guardada_ms = None
 esperando_seek = False
 ultimo_reintento_fin = 0.0
 momento_presion_boton1 = 0.0
@@ -425,6 +426,8 @@ def _cambiar_modo(nuevo_modo, ms_destino, motivo):
 
 
 def ir_a_presentacion(motivo):
+    global posicion_guardada_ms
+    posicion_guardada_ms = None
     _cancelar_timer()
     _cambiar_modo(MODO_PRESENTACION, CUE1, motivo)
 
@@ -502,24 +505,36 @@ def registrar_presion_boton1():
 
 
 def boton1_al_soltar():
-    """Botón1: inicia sesión / escala loop CUE4-CUE5 si el timer sigue activo."""
-    global ultimo_boton1, modo
+    """Botón1: sesión / entra o sale del loop CUE4-CUE5 (toggle con posición guardada)."""
+    global ultimo_boton1, modo, posicion_guardada_ms
     duracion = time.monotonic() - momento_presion_boton1
     if not _pulso_valido(duracion, ultimo_boton1, "GPIO23"):
         return
     ultimo_boton1 = time.monotonic()
 
     if modo == MODO_PRESENTACION:
+        posicion_guardada_ms = None
         _iniciar_timer()
         _cambiar_modo(MODO_SESION_A, CUE3, "botón1 en presentación")
         return
 
     if modo == MODO_SESION_A and _timer_activo():
+        current = player.get_time()
+        posicion_guardada_ms = current if current >= 0 else 0
         _cambiar_modo(MODO_SESION_B, CUE4, "botón1 dentro del timer (CUE4-CUE5)")
+        logger.info(f"Posición guardada: {posicion_guardada_ms} ms.")
         return
 
     if modo == MODO_SESION_B and _timer_activo():
-        logger.info("GPIO23: ya en loop CUE4-CUE5; pulsación ignorada.")
+        modo = MODO_SESION_A
+        if posicion_guardada_ms is not None:
+            logger.info(
+                f"Loop CUE4-CUE5 DESACTIVADO. Vuelve a {posicion_guardada_ms} ms."
+            )
+            ir_a_tiempo(posicion_guardada_ms)
+        else:
+            logger.info("Loop CUE4-CUE5 DESACTIVADO (sin posición guardada).")
+        posicion_guardada_ms = None
         return
 
     logger.info(f"GPIO23: pulsación ignorada en modo {modo}.")

@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.log
 control.log
+config.json
 .env
 .DS_Store
 *.mp4

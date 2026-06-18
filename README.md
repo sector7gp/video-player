@@ -12,7 +12,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 | Proyecto en la Pi | `/home/video1/video-player` |
 | Video | `/media/video1.mp4` |
 | Arranque | Loop presentación **CUE1 → CUE2** |
-| Botón1 (GPIO23) | Inicia timer + loop **CUE3 → CUE4**; 2.ª pulsación → **CUE4 → CUE5** |
+| Botón1 (GPIO23) | Inicia timer + loop **CUE3 → CUE4**; 2.ª pulsación → **CUE4 → CUE5** (guarda posición); 3.ª pulsación → vuelve a posición guardada |
 | Timer | `timer_minutos` en `config.json`; al vencer → salta a **CUE6** |
 | Botón2 (GPIO24) | Siempre vuelve a **CUE1** (presentación) |
 | Configuración | `config.json` (cuepoints + timer) |
@@ -30,7 +30,8 @@ stateDiagram-v2
     Finale: Finale\nCUE6 hasta el fin
 
     Presentacion --> SesionA: Botón1
-    SesionA --> SesionB: Botón1 dentro del timer
+    SesionA --> SesionB: Botón1 guarda posición
+    SesionB --> SesionA: Botón1 restaura posición
     SesionA --> Finale: Timer vence
     SesionB --> Finale: Timer vence
     Finale --> Presentacion: Fin del video
@@ -44,7 +45,7 @@ stateDiagram-v2
 
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
 - **Presentación al arrancar:** loop entre `cue1_ms` y `cue2_ms`.
-- **Botón1 (GPIO23):** inicia timer de `timer_minutos`; loop **CUE3–CUE4**. Segunda pulsación dentro del timer → loop **CUE4–CUE5**.
+- **Botón1 (GPIO23):** inicia timer de `timer_minutos`; loop **CUE3–CUE4**. Segunda pulsación (timer activo) → loop **CUE4–CUE5** guardando posición. Tercera pulsación en CUE4–CUE5 → vuelve a la posición guardada y sigue en sesión A.
 - **Timer:** al completarse salta a `cue6_ms` y reproduce hasta el final; luego vuelve a presentación.
 - **Botón2 (GPIO24):** en cualquier momento seek a `cue1_ms` y cancela el timer.
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
@@ -74,6 +75,8 @@ git clone https://github.com/sector7gp/video-player.git /home/video1/video-playe
 # sudo cp /ruta/origen.mp4 /media/video1.mp4
 
 cd /home/video1/video-player
+cp config.json.example config.json   # solo la primera vez; editar cuepoints locales
+# Editar config.json con los tiempos de tu video (no se sobreescribe con git pull)
 sudo bash deploy/install-service.sh video1
 sudo reboot
 ```
@@ -100,7 +103,7 @@ python3 video_control.py
 
 | Botón | Acción |
 |-------|--------|
-| GPIO23 (botón1) | En presentación: inicia timer + loop CUE3–CUE4. En sesión A (timer activo): loop CUE4–CUE5 |
+| GPIO23 (botón1) | En presentación: timer + loop CUE3–CUE4. En sesión A: entra loop CUE4–CUE5 (guarda posición). En sesión B: sale del loop y vuelve a la posición guardada |
 | GPIO24 (botón2) | Siempre: vuelve a CUE1 y cancela timer |
 
 ### Servicio systemd
@@ -117,24 +120,13 @@ El unit (`deploy/video-control.service`) arranca sin escritorio: espera `/dev/dr
 
 ### `config.json`
 
-Editar `config.json` en el directorio del proyecto:
+`config.json` **no está en el repositorio** (configuración local por instalación). Copiá la plantilla y editá los cuepoints:
 
-```json
-{
-  "video": {
-    "path": "/media/video1.mp4"
-  },
-  "cuepoints": {
-    "cue1_ms": 20,
-    "cue2_ms": 12000,
-    "cue3_ms": 14000,
-    "cue4_ms": 14500,
-    "cue5_ms": 16000,
-    "cue6_ms": 200000
-  },
-  "timer_minutos": 5
-}
+```bash
+cp config.json.example config.json
 ```
+
+Plantilla (`config.json.example`):
 
 | Campo | Descripción |
 |-------|-------------|
@@ -148,6 +140,8 @@ Editar `config.json` en el directorio del proyecto:
 | `timer_minutos` | Duración del timer tras botón1 |
 
 Los cuepoints deben ser **estrictamente crecientes**: CUE1 < CUE2 < … < CUE6.
+
+`git pull` no modifica tu `config.json` local. El instalador crea `config.json` desde la plantilla si no existe.
 
 Ruta alternativa del archivo: variable de entorno `CONFIG_PATH`.
 
@@ -218,7 +212,7 @@ Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4
 
 - **Presentación:** al arrancar, loop `CUE1 → CUE2` hasta que se pulse botón1.
 - **Sesión A:** botón1 inicia el timer y loop `CUE3 → CUE4`.
-- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE4 → CUE5`.
+- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE4 → CUE5` (guarda posición). Tercera pulsación → restaura posición y vuelve a sesión A.
 - **Finale:** timer vencido → seek a `CUE6`; al terminar el video vuelve a presentación.
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 
@@ -227,8 +221,9 @@ Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4
 ```
 video-player/
 ├── video_control.py      # Programa principal (v2.0)
-├── config.json           # Cuepoints + timer
-├── VERSION               # 2.0.0
+├── config.json.example   # Plantilla de cuepoints + timer
+├── config.json           # Local (gitignore); copiar desde .example
+├── VERSION               # 2.0.1
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -241,6 +236,11 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.0.1 (2026-06-09)
+
+- Botón1 en loop CUE4–CUE5: toggle off restaura la posición guardada (como el loop corto anterior).
+- `config.json` ignorado por git; plantilla en `config.json.example` para configuración local.
 
 ### v2.0.0 (2026-06-09)
 
