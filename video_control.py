@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.7"""
-__version__ = "2.0.7"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.8"""
+__version__ = "2.0.8"
 
 import json
 import os
@@ -634,18 +634,45 @@ def _set_marquee_visible(show, text=BOTON1_LARGO_OVERLAY_TEXTO):
         return False
     try:
         option = vlc.VideoMarqueeOption
-        pos_center = getattr(vlc.Position, "center", 0)
         if show:
             player.video_set_marquee_string(option.Text, text)
-            player.video_set_marquee_int(option.Size, BOTON1_LARGO_OVERLAY_TAMANO)
-            player.video_set_marquee_int(option.Color, BOTON1_LARGO_OVERLAY_COLOR)
-            player.video_set_marquee_int(option.Opacity, BOTON1_LARGO_OVERLAY_OPACIDAD)
+            # Estas opciones pueden no existir o no estar soportadas en todas las builds.
+            try:
+                player.video_set_marquee_int(option.Size, BOTON1_LARGO_OVERLAY_TAMANO)
+            except Exception:
+                pass
+            try:
+                player.video_set_marquee_int(option.Color, BOTON1_LARGO_OVERLAY_COLOR)
+            except Exception:
+                pass
+            try:
+                player.video_set_marquee_int(option.Opacity, BOTON1_LARGO_OVERLAY_OPACIDAD)
+            except Exception:
+                pass
             if BOTON1_LARGO_OVERLAY_CENTRADO:
-                player.video_set_marquee_int(option.Position, int(pos_center))
+                try:
+                    pos_enum = getattr(vlc, "Position", None)
+                    pos_center = None
+                    if pos_enum is not None:
+                        pos_center = (
+                            getattr(pos_enum, "center", None)
+                            or getattr(pos_enum, "Center", None)
+                        )
+                    if pos_center is not None:
+                        player.video_set_marquee_int(option.Position, int(pos_center))
+                    else:
+                        # Fallback compatible: centrar por coordenadas cuando Position no existe.
+                        player.video_set_marquee_int(option.X, 0)
+                        player.video_set_marquee_int(option.Y, 0)
+                except Exception:
+                    pass
             player.video_set_marquee_int(option.Timeout, 0)
             player.video_set_marquee_int(option.Enable, 1)
         else:
-            player.video_set_marquee_int(option.Enable, 0)
+            try:
+                player.video_set_marquee_int(option.Enable, 0)
+            except Exception:
+                pass
         return True
     except Exception as e:
         marquee_disponible = False

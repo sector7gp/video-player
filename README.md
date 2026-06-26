@@ -245,7 +245,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.0.7
+├── VERSION               # 2.0.8
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -262,6 +262,10 @@ video-player/
 ### v2.0.6 (2026-06-26)
 
 - Pulsación larga de botón1 muestra overlay en pantalla (`SOLTAR PARA / REINICIAR`) al cumplir el umbral y lo oculta al soltar.
+
+### v2.0.8 (2026-06-26)
+
+- Fix de compatibilidad marquee: si `Position/Color/Opacity` no están soportados por la build de VLC, el overlay sigue mostrando texto (degradación elegante).
 
 ### v2.0.7 (2026-06-26)
 
