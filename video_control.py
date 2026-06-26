@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.3"""
-__version__ = "2.0.3"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.5"""
+__version__ = "2.0.5"
 
 import json
 import os
@@ -35,6 +35,11 @@ logger.info(f"Iniciando video-player v{__version__}...")
 
 CONFIG_DEFAULT = {
     "video": {"path": "/media/video1.mp4"},
+    "audio": {
+        "salida": "hdmi",
+        "alsa_hdmi": "plughw:CARD=vc4hdmi0,DEV=0",
+        "alsa_externa": "plughw:CARD=Device,DEV=0",
+    },
     "cuepoints": {
         "cue1_ms": 20,
         "cue2_ms": 12000,
@@ -45,6 +50,10 @@ CONFIG_DEFAULT = {
         "cue7_ms": 210000,
     },
     "timer_minutos": 5,
+    "boton1_largo": {
+        "segundos": 5,
+        "comando": "systemctl restart video-control",
+    },
 }
 
 CUE_KEYS = (
@@ -71,12 +80,15 @@ def _deep_merge(base, override):
 
 def _log_resumen_config(cfg):
     cues = cfg["cuepoints"]
+    audio = cfg["audio"]
     logger.info(
         f"Config cargada: video={cfg['video']['path']} | "
         f"CUE1={cues['cue1_ms']} CUE2={cues['cue2_ms']} CUE3={cues['cue3_ms']} "
         f"CUE4={cues['cue4_ms']} CUE5={cues['cue5_ms']} CUE6={cues['cue6_ms']} "
         f"CUE7={cues['cue7_ms']} ms | "
-        f"timer={cfg['timer_minutos']} min"
+        f"timer={cfg['timer_minutos']} min | "
+        f"audio={audio['salida']} | "
+        f"boton1_largo={cfg['boton1_largo']['segundos']}s"
     )
 
 
@@ -115,6 +127,20 @@ def cargar_config():
         logger.error(f"config.json: el archivo de video no existe: {video_path}")
         sys.exit(1)
 
+    audio = cfg.get("audio")
+    if not isinstance(audio, dict):
+        logger.error("config.json: audio debe ser un objeto.")
+        sys.exit(1)
+    salida = str(audio.get("salida", "")).strip().lower()
+    if salida not in ("hdmi", "externa"):
+        logger.error("config.json: audio.salida debe ser 'hdmi' o 'externa'.")
+        sys.exit(1)
+    for key in ("alsa_hdmi", "alsa_externa"):
+        value = str(audio.get(key, "")).strip()
+        if not value:
+            logger.error(f"config.json: audio.{key} no puede estar vacío.")
+            sys.exit(1)
+
     cues = cfg["cuepoints"]
     valores_cue = []
     for key in CUE_KEYS:
@@ -138,6 +164,19 @@ def cargar_config():
     timer_minutos = cfg.get("timer_minutos")
     if not isinstance(timer_minutos, (int, float)) or timer_minutos <= 0:
         logger.error("config.json: timer_minutos debe ser un número > 0.")
+        sys.exit(1)
+
+    boton1_largo = cfg.get("boton1_largo")
+    if not isinstance(boton1_largo, dict):
+        logger.error("config.json: boton1_largo debe ser un objeto.")
+        sys.exit(1)
+    hold_s = boton1_largo.get("segundos")
+    if not isinstance(hold_s, (int, float)) or hold_s <= 0:
+        logger.error("config.json: boton1_largo.segundos debe ser un número > 0.")
+        sys.exit(1)
+    comando = str(boton1_largo.get("comando", "")).strip()
+    if not comando:
+        logger.error("config.json: boton1_largo.comando no puede estar vacío.")
         sys.exit(1)
 
     _log_resumen_config(cfg)
@@ -303,6 +342,8 @@ CUE6 = int(config["cuepoints"]["cue6_ms"])
 CUE7 = int(config["cuepoints"]["cue7_ms"])
 TIMER_MINUTOS = float(config["timer_minutos"])
 TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
+BOTON1_LARGO_SEGUNDOS = float(config["boton1_largo"]["segundos"])
+BOTON1_LARGO_COMANDO = str(config["boton1_largo"]["comando"]).strip()
 
 # GPIO (Raspberry Pi 5, chip 0) — pull-up interno, botón a GND
 GPIO_BOTON1 = 23
@@ -325,11 +366,20 @@ except Exception as e:
     logger.error(f"Error al configurar GPIO: {e}")
     sys.exit(1)
 
-# Audio: "hdmi" (por defecto) o "externa" (placa USB / HAT). También: variable de entorno AUDIO_SALIDA.
-# Dispositivos ALSA: listar con `aplay -l` y probar con `speaker-test -D plughw:1,0 -c2`
-AUDIO_SALIDA = os.environ.get("AUDIO_SALIDA", "hdmi").strip().lower()
-ALSA_HDMI = os.environ.get("ALSA_HDMI", "plughw:CARD=vc4hdmi0,DEV=0")
-ALSA_EXTERNA = os.environ.get("ALSA_EXTERNA", "plughw:1,0")
+# Audio centralizado en config.json con override opcional por variables de entorno.
+def _resolver_audio(config):
+    cfg_audio = config["audio"]
+    salida_cfg = str(cfg_audio.get("salida", "hdmi")).strip().lower()
+    alsa_hdmi_cfg = str(cfg_audio.get("alsa_hdmi", "")).strip()
+    alsa_externa_cfg = str(cfg_audio.get("alsa_externa", "")).strip()
+
+    salida = os.environ.get("AUDIO_SALIDA", salida_cfg).strip().lower()
+    alsa_hdmi = os.environ.get("ALSA_HDMI", alsa_hdmi_cfg).strip()
+    alsa_externa = os.environ.get("ALSA_EXTERNA", alsa_externa_cfg).strip()
+    return salida, alsa_hdmi, alsa_externa
+
+
+AUDIO_SALIDA, ALSA_HDMI, ALSA_EXTERNA = _resolver_audio(config)
 
 
 def opciones_vlc():
@@ -516,10 +566,48 @@ def registrar_presion_boton1():
     momento_presion_boton1 = time.monotonic()
 
 
+def _ejecutar_comando_boton1_largo():
+    """Ejecuta comando de recuperación para pulsación larga de botón1."""
+    logger.warning(
+        f"GPIO23: pulsación larga detectada (>= {BOTON1_LARGO_SEGUNDOS}s). "
+        f"Ejecutando comando: {BOTON1_LARGO_COMANDO}"
+    )
+    try:
+        result = subprocess.run(
+            BOTON1_LARGO_COMANDO,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode == 0:
+            logger.info("Comando de pulsación larga ejecutado correctamente.")
+        else:
+            salida = (result.stderr or result.stdout or "").strip()
+            logger.error(
+                f"Comando de pulsación larga falló (exit {result.returncode}): {salida}"
+            )
+    except Exception as e:
+        logger.error(f"Error ejecutando comando de pulsación larga: {e}")
+
+
 def boton1_al_soltar():
     """Botón1: sesión / entra o sale del loop CUE4-CUE5 (toggle con posición guardada)."""
     global ultimo_boton1, modo, posicion_guardada_ms
     duracion = time.monotonic() - momento_presion_boton1
+    if duracion >= BOTON1_LARGO_SEGUNDOS:
+        if time.monotonic() - ultimo_boton1 < DEBOUNCE_BOTON_S:
+            logger.info("GPIO23: pulsación larga ignorada (antirebote software).")
+            return
+        ultimo_boton1 = time.monotonic()
+        threading.Thread(
+            target=_ejecutar_comando_boton1_largo,
+            daemon=True,
+            name="boton1-largo",
+        ).start()
+        return
+
     if not _pulso_valido(duracion, ultimo_boton1, "GPIO23"):
         return
     ultimo_boton1 = time.monotonic()

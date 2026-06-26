@@ -16,7 +16,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 | Timer | Al vencer → **CUE6**; al llegar a **CUE7** → reinicio en **CUE1** |
 | Botón2 (GPIO24) | Siempre vuelve a **CUE1** (presentación) |
 | Configuración | `config.json` (cuepoints + timer) |
-| Audio | `hdmi` (default) o `externa` (`AUDIO_SALIDA`) |
+| Audio | En `config.json` (`audio.salida`, `audio.alsa_*`) con override por env vars |
 | Servicio | `video-control.service` → `multi-user.target` |
 
 ## Flujo de estados
@@ -139,6 +139,11 @@ Plantilla (`config.json.example`):
 | `cuepoints.cue6_ms` | Salto al vencer el timer |
 | `cuepoints.cue7_ms` | Reinicio a CUE1 al llegar aquí (post-timer) |
 | `timer_minutos` | Duración del timer tras botón1 |
+| `boton1_largo.segundos` | Umbral de pulsación larga para botón1 |
+| `boton1_largo.comando` | Comando a ejecutar en pulsación larga (recuperación) |
+| `audio.salida` | `hdmi` o `externa` |
+| `audio.alsa_hdmi` | Dispositivo ALSA HDMI |
+| `audio.alsa_externa` | Dispositivo ALSA externo (USB/HAT) |
 
 Los cuepoints deben ser **estrictamente crecientes**: CUE1 < CUE2 < … < CUE7.
 
@@ -159,13 +164,21 @@ INFO - Video: /media/video1.mp4
 INFO - Duración: 22356 ms (0:22) [ffprobe]
 ```
 
-### Audio y GPIO (variables de entorno)
+### Audio (config + override env vars)
+
+Por defecto, el script toma audio desde `config.json`:
+
+- `audio.salida`
+- `audio.alsa_hdmi`
+- `audio.alsa_externa`
+
+Si definís variables de entorno en systemd, tienen prioridad sobre config:
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
 | `AUDIO_SALIDA` | `hdmi` | `hdmi` o `externa` |
 | `ALSA_HDMI` | `plughw:CARD=vc4hdmi0,DEV=0` | Dispositivo ALSA para HDMI |
-| `ALSA_EXTERNA` | `plughw:1,0` | Dispositivo ALSA para placa externa |
+| `ALSA_EXTERNA` | `plughw:CARD=Device,DEV=0` | Dispositivo ALSA para placa externa |
 
 ## Audio (HDMI o placa externa)
 
@@ -216,6 +229,7 @@ Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4
 - **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE4 → CUE5` (guarda posición). Tercera pulsación → restaura posición y vuelve a sesión A.
 - **Finale:** timer vencido → seek a `CUE6`; al llegar a `CUE7` → reinicio en `CUE1` (presentación).
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
+- **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
 
 ## Estructura del repositorio
 
@@ -224,7 +238,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.0.1
+├── VERSION               # 2.0.4
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -237,6 +251,15 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.0.5 (2026-06-26)
+
+- Botón1 con pulsación larga configurable: ejecuta `boton1_largo.comando` al superar `boton1_largo.segundos`.
+
+### v2.0.4 (2026-06-26)
+
+- Audio centralizado en `config.json` (`audio.salida`, `audio.alsa_hdmi`, `audio.alsa_externa`).
+- Variables de entorno siguen disponibles como override (`AUDIO_SALIDA`, `ALSA_HDMI`, `ALSA_EXTERNA`).
 
 ### v2.0.3 (2026-06-09)
 

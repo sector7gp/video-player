@@ -2,6 +2,11 @@
   "video": {
     "path": "/media/video1.mp4"
   },
+  "audio": {
+    "salida": "hdmi",
+    "alsa_hdmi": "plughw:CARD=vc4hdmi0,DEV=0",
+    "alsa_externa": "plughw:CARD=Device,DEV=0"
+  },
   "cuepoints": {
     "cue1_ms": 20,
     "cue2_ms": 12000,
@@ -11,5 +16,9 @@
     "cue6_ms": 200000,
     "cue7_ms": 210000
   },
-  "timer_minutos": 5
+  "timer_minutos": 5,
+  "boton1_largo": {
+    "segundos": 5,
+    "comando": "systemctl restart video-control"
+  }
 }
