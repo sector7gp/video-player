@@ -230,6 +230,7 @@ Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4
 - **Finale:** timer vencido → seek a `CUE6`; al llegar a `CUE7` → reinicio en `CUE1` (presentación).
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 - **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
+- **Overlay de confirmación:** al superar `boton1_largo.segundos` se muestra `SOLTAR PARA / REINICIAR`; al soltar se oculta.
 
 ## Estructura del repositorio
 
@@ -255,6 +256,10 @@ video-player/
 ### v2.0.5 (2026-06-26)
 
 - Botón1 con pulsación larga configurable: ejecuta `boton1_largo.comando` al superar `boton1_largo.segundos`.
+
+### v2.0.6 (2026-06-26)
+
+- Pulsación larga de botón1 muestra overlay en pantalla (`SOLTAR PARA / REINICIAR`) al cumplir el umbral y lo oculta al soltar.
 
 ### v2.0.4 (2026-06-26)
 

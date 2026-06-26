@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.5"""
-__version__ = "2.0.5"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.6"""
+__version__ = "2.0.6"
 
 import json
 import os
@@ -344,6 +344,7 @@ TIMER_MINUTOS = float(config["timer_minutos"])
 TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
 BOTON1_LARGO_SEGUNDOS = float(config["boton1_largo"]["segundos"])
 BOTON1_LARGO_COMANDO = str(config["boton1_largo"]["comando"]).strip()
+BOTON1_LARGO_OVERLAY_TEXTO = "SOLTAR PARA\nREINICIAR"
 
 # GPIO (Raspberry Pi 5, chip 0) — pull-up interno, botón a GND
 GPIO_BOTON1 = 23
@@ -436,6 +437,9 @@ momento_presion_boton1 = 0.0
 momento_presion_boton2 = 0.0
 ultimo_boton1 = 0.0
 ultimo_boton2 = 0.0
+boton1_hold_token = 0
+boton1_overlay_visible = False
+marquee_disponible = True
 
 
 def asegurar_reproduciendo():
@@ -562,8 +566,65 @@ def _pulso_valido(duracion, ultimo, nombre):
 
 
 def registrar_presion_boton1():
-    global momento_presion_boton1
+    global momento_presion_boton1, boton1_hold_token
     momento_presion_boton1 = time.monotonic()
+    boton1_hold_token += 1
+    token = boton1_hold_token
+    threading.Thread(
+        target=_monitor_pulsacion_larga_boton1,
+        args=(token, momento_presion_boton1),
+        daemon=True,
+        name="boton1-largo-monitor",
+    ).start()
+
+
+def _set_marquee_visible(show, text=BOTON1_LARGO_OVERLAY_TEXTO):
+    """Muestra/oculta texto overlay usando marquee de VLC."""
+    global marquee_disponible
+    if not marquee_disponible:
+        return False
+    try:
+        if show:
+            player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, text)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 36)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Timeout, 0)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1)
+        else:
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 0)
+        return True
+    except Exception as e:
+        marquee_disponible = False
+        logger.warning(f"Overlay marquee no disponible en este entorno VLC: {e}")
+        return False
+
+
+def _mostrar_overlay_boton1_largo():
+    global boton1_overlay_visible
+    if boton1_overlay_visible:
+        return
+    if _set_marquee_visible(True):
+        boton1_overlay_visible = True
+        logger.info("Overlay mostrado: SOLTAR PARA / REINICIAR")
+
+
+def _ocultar_overlay_boton1_largo():
+    global boton1_overlay_visible
+    if not boton1_overlay_visible:
+        return
+    _set_marquee_visible(False)
+    boton1_overlay_visible = False
+    logger.info("Overlay ocultado.")
+
+
+def _monitor_pulsacion_larga_boton1(token, inicio):
+    """Si sigue presionado al cumplir el umbral, muestra overlay."""
+    deadline = inicio + BOTON1_LARGO_SEGUNDOS
+    while time.monotonic() < deadline:
+        if token != boton1_hold_token or not boton1.is_pressed:
+            return
+        time.sleep(0.05)
+    if token == boton1_hold_token and boton1.is_pressed:
+        _mostrar_overlay_boton1_largo()
 
 
 def _ejecutar_comando_boton1_largo():
@@ -594,8 +655,10 @@ def _ejecutar_comando_boton1_largo():
 
 def boton1_al_soltar():
     """Botón1: sesión / entra o sale del loop CUE4-CUE5 (toggle con posición guardada)."""
-    global ultimo_boton1, modo, posicion_guardada_ms
+    global ultimo_boton1, modo, posicion_guardada_ms, boton1_hold_token
+    boton1_hold_token += 1  # invalida monitor de pulsación larga en curso
     duracion = time.monotonic() - momento_presion_boton1
+    _ocultar_overlay_boton1_largo()
     if duracion >= BOTON1_LARGO_SEGUNDOS:
         if time.monotonic() - ultimo_boton1 < DEBOUNCE_BOTON_S:
             logger.info("GPIO23: pulsación larga ignorada (antirebote software).")
