@@ -19,6 +19,14 @@
   "timer_minutos": 5,
   "boton1_largo": {
     "segundos": 5,
-    "comando": "systemctl restart video-control"
+    "comando": "systemctl restart video-control",
+    "overlay": {
+      "texto": "SOLTAR PARA\nREINICIAR",
+      "tamano": 42,
+      "centrado": true,
+      "color_hex": "FFFFFF",
+      "opacidad": 255,
+      "sombra_roja": true
+    }
   }
 }

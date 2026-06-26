@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.6"""
-__version__ = "2.0.6"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.7"""
+__version__ = "2.0.7"
 
 import json
 import os
@@ -53,6 +53,14 @@ CONFIG_DEFAULT = {
     "boton1_largo": {
         "segundos": 5,
         "comando": "systemctl restart video-control",
+        "overlay": {
+            "texto": "SOLTAR PARA\nREINICIAR",
+            "tamano": 42,
+            "centrado": True,
+            "color_hex": "FFFFFF",
+            "opacidad": 255,
+            "sombra_roja": True,
+        },
     },
 }
 
@@ -177,6 +185,37 @@ def cargar_config():
     comando = str(boton1_largo.get("comando", "")).strip()
     if not comando:
         logger.error("config.json: boton1_largo.comando no puede estar vacío.")
+        sys.exit(1)
+    overlay = boton1_largo.get("overlay")
+    if not isinstance(overlay, dict):
+        logger.error("config.json: boton1_largo.overlay debe ser un objeto.")
+        sys.exit(1)
+    texto = str(overlay.get("texto", "")).strip()
+    if not texto:
+        logger.error("config.json: boton1_largo.overlay.texto no puede estar vacío.")
+        sys.exit(1)
+    tamano = overlay.get("tamano")
+    if not isinstance(tamano, (int, float)) or tamano <= 0:
+        logger.error("config.json: boton1_largo.overlay.tamano debe ser un número > 0.")
+        sys.exit(1)
+    if not isinstance(overlay.get("centrado"), bool):
+        logger.error("config.json: boton1_largo.overlay.centrado debe ser true/false.")
+        sys.exit(1)
+    opacidad = overlay.get("opacidad")
+    if not isinstance(opacidad, (int, float)) or not (0 <= int(opacidad) <= 255):
+        logger.error("config.json: boton1_largo.overlay.opacidad debe estar entre 0 y 255.")
+        sys.exit(1)
+    color_hex = str(overlay.get("color_hex", "")).strip().lstrip("#")
+    if len(color_hex) != 6:
+        logger.error("config.json: boton1_largo.overlay.color_hex debe tener 6 hex dígitos.")
+        sys.exit(1)
+    try:
+        int(color_hex, 16)
+    except ValueError:
+        logger.error("config.json: boton1_largo.overlay.color_hex es inválido.")
+        sys.exit(1)
+    if not isinstance(overlay.get("sombra_roja"), bool):
+        logger.error("config.json: boton1_largo.overlay.sombra_roja debe ser true/false.")
         sys.exit(1)
 
     _log_resumen_config(cfg)
@@ -344,7 +383,17 @@ TIMER_MINUTOS = float(config["timer_minutos"])
 TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
 BOTON1_LARGO_SEGUNDOS = float(config["boton1_largo"]["segundos"])
 BOTON1_LARGO_COMANDO = str(config["boton1_largo"]["comando"]).strip()
-BOTON1_LARGO_OVERLAY_TEXTO = "SOLTAR PARA\nREINICIAR"
+BOTON1_LARGO_OVERLAY_TEXTO = str(config["boton1_largo"]["overlay"]["texto"])
+BOTON1_LARGO_OVERLAY_TAMANO = int(config["boton1_largo"]["overlay"]["tamano"])
+BOTON1_LARGO_OVERLAY_CENTRADO = bool(config["boton1_largo"]["overlay"]["centrado"])
+BOTON1_LARGO_OVERLAY_COLOR = int(
+    str(config["boton1_largo"]["overlay"]["color_hex"]).strip().lstrip("#"),
+    16,
+)
+BOTON1_LARGO_OVERLAY_OPACIDAD = int(config["boton1_largo"]["overlay"]["opacidad"])
+BOTON1_LARGO_OVERLAY_SOMBRA_ROJA = bool(
+    config["boton1_largo"]["overlay"]["sombra_roja"]
+)
 
 # GPIO (Raspberry Pi 5, chip 0) — pull-up interno, botón a GND
 GPIO_BOTON1 = 23
@@ -584,13 +633,19 @@ def _set_marquee_visible(show, text=BOTON1_LARGO_OVERLAY_TEXTO):
     if not marquee_disponible:
         return False
     try:
+        option = vlc.VideoMarqueeOption
+        pos_center = getattr(vlc.Position, "center", 0)
         if show:
-            player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, text)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 36)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Timeout, 0)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1)
+            player.video_set_marquee_string(option.Text, text)
+            player.video_set_marquee_int(option.Size, BOTON1_LARGO_OVERLAY_TAMANO)
+            player.video_set_marquee_int(option.Color, BOTON1_LARGO_OVERLAY_COLOR)
+            player.video_set_marquee_int(option.Opacity, BOTON1_LARGO_OVERLAY_OPACIDAD)
+            if BOTON1_LARGO_OVERLAY_CENTRADO:
+                player.video_set_marquee_int(option.Position, int(pos_center))
+            player.video_set_marquee_int(option.Timeout, 0)
+            player.video_set_marquee_int(option.Enable, 1)
         else:
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 0)
+            player.video_set_marquee_int(option.Enable, 0)
         return True
     except Exception as e:
         marquee_disponible = False
@@ -602,6 +657,11 @@ def _mostrar_overlay_boton1_largo():
     global boton1_overlay_visible
     if boton1_overlay_visible:
         return
+    if BOTON1_LARGO_OVERLAY_SOMBRA_ROJA:
+        logger.info(
+            "Overlay: 'sombra_roja' solicitada. VLC marquee no soporta fondo/sombra real; "
+            "se aplica color y opacidad configurados."
+        )
     if _set_marquee_visible(True):
         boton1_overlay_visible = True
         logger.info("Overlay mostrado: SOLTAR PARA / REINICIAR")
