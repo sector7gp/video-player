@@ -3,9 +3,12 @@ __version__ = "2.1.1"
 
 import json
 import os
+import select
 import subprocess
 import sys
+import termios
 import threading
+import tty
 import vlc
 import time
 import logging
@@ -496,11 +499,58 @@ ultimo_boton2 = 0.0
 boton1_hold_token = 0
 boton1_overlay_visible = False
 marquee_disponible = True
+stdin_fd = None
+stdin_termios_original = None
 
 
 def asegurar_reproduciendo():
     if player.get_state() != vlc.State.Playing:
         player.play()
+
+
+def _inicializar_teclado_esc():
+    """Configura stdin en cbreak para detectar ESC sin Enter (si hay TTY)."""
+    global stdin_fd, stdin_termios_original
+    if not sys.stdin or not sys.stdin.isatty():
+        return False
+    try:
+        stdin_fd = sys.stdin.fileno()
+        stdin_termios_original = termios.tcgetattr(stdin_fd)
+        tty.setcbreak(stdin_fd)
+        logger.info("Teclado activo: presioná ESC para salir.")
+        return True
+    except Exception as e:
+        stdin_fd = None
+        stdin_termios_original = None
+        logger.warning(f"No se pudo activar lectura de ESC en teclado: {e}")
+        return False
+
+
+def _restaurar_teclado():
+    """Restaura la configuración original del terminal si fue modificada."""
+    global stdin_fd, stdin_termios_original
+    if stdin_fd is None or stdin_termios_original is None:
+        return
+    try:
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, stdin_termios_original)
+    except Exception:
+        pass
+    stdin_fd = None
+    stdin_termios_original = None
+
+
+def _esc_presionado():
+    """Devuelve True cuando se detecta tecla ESC en stdin."""
+    if stdin_fd is None:
+        return False
+    try:
+        ready, _, _ = select.select([stdin_fd], [], [], 0)
+        if not ready:
+            return False
+        tecla = os.read(stdin_fd, 1)
+        return tecla == b"\x1b"
+    except Exception:
+        return False
 
 
 def ir_a_tiempo(ms):
@@ -833,14 +883,21 @@ logger.info("Iniciando reproducción (presentación CUE1-CUE2)...")
 ir_a_tiempo(CUE1)
 iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
+teclado_esc_activo = _inicializar_teclado_esc()
+
 try:
     while True:
+        if teclado_esc_activo and _esc_presionado():
+            logger.info("Tecla ESC detectada. Saliendo de la aplicación...")
+            break
         state = player.get_state()
         current_time = player.get_time()
         _gestionar_loop(current_time, state)
         time.sleep(0.05)
 
 except KeyboardInterrupt:
-    logger.info("Interrupción por teclado detectada. Deteniendo reproducción y saliendo...")
+    logger.info("Interrupción por teclado detectada. Saliendo de la aplicación...")
+finally:
     player.stop()
+    _restaurar_teclado()
     logger.info("Programa finalizado.")

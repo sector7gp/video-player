@@ -105,6 +105,8 @@ cd /home/video1/video-player
 python3 video_control.py
 ```
 
+En ejecución manual desde terminal, podés cerrar la app presionando `ESC` (además de `Ctrl+C`).
+
 ### Botones
 
 | Botón | Acción |
@@ -235,6 +237,72 @@ sudo systemctl restart video-control.service
 En `control.log` debe aparecer: `Audio: placa externa (plughw:1,0)`.
 
 Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4hdmi1,DEV=0` en `ALSA_HDMI`.
+
+### Pérdida intermitente de audio USB (bug conocido + fix replicable)
+
+En algunas instalaciones con placa USB (por ejemplo, **VENTION CDKHB**), puede pasar que el video siga reproduciendo pero el audio se corte. Reiniciar `video-control.service` suele recuperar el sonido temporalmente.
+
+**Síntomas típicos**
+
+- El audio desaparece de forma aleatoria, sin detener el video.
+- En logs de VLC/ALSA aparece: `cannot recover playback stream: No such device`.
+- Reiniciar la app devuelve audio, pero el problema vuelve con el tiempo.
+
+**Evidencia de causa raíz (dmesg)**
+
+En `dmesg` se observan eventos de reconexión física/lógica del USB, por ejemplo:
+
+- `usb usb3-port2: disabled by hub (EMI?), re-enabling...`
+- `USB disconnect, device number ...`
+
+Esto apunta a que el dispositivo USB de audio se está deshabilitando/reinicializando por gestión de energía, ruido eléctrico (EMI) o estabilidad de alimentación/bus USB.
+
+**Mitigación software 1: desactivar autosuspend global USB**
+
+1. Editar `/boot/firmware/cmdline.txt` (una sola línea) y agregar:
+
+```bash
+usbcore.autosuspend=-1
+```
+
+2. Reiniciar:
+
+```bash
+sudo reboot
+```
+
+**Mitigación software 2: forzar power/control=on por udev**
+
+1. Obtener vendor y product del dispositivo USB de audio:
+
+```bash
+lsusb
+```
+
+2. Crear la regla udev (ejemplo para `0d8c:0014`):
+
+```bash
+sudo tee /etc/udev/rules.d/99-usb-audio-power.rules >/dev/null <<'EOF'
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0d8c", ATTR{idProduct}=="0014", TEST=="power/control", ATTR{power/control}="on"
+EOF
+```
+
+3. Recargar reglas y aplicar:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+4. Verificar:
+
+```bash
+cat /sys/bus/usb/devices/*/power/control
+```
+
+**Nota sobre `snd_usb_audio`**
+
+En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para `snd_usb_audio` (por eso no se puede resolver desde `/sys/module/snd_usb_audio/parameters/power_save`). En este caso, usar las mitigaciones anteriores (`usbcore.autosuspend=-1` + regla `udev`) es el camino recomendado.
 
 ## Cómo funcionan los loops
 
