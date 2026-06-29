@@ -1,21 +1,20 @@
-# video-player v2.1
+# video-player v2.2
 
 Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 2.1 — Resumen
+## Versión 2.2 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
 | Plataforma | Raspberry Pi 5, `lgpio` (chip 0) |
 | Proyecto en la Pi | `/home/video1/video-player` |
 | Video | `/media/video1.mp4` |
-| Arranque | Loop presentación **CUE1 → CUE2** |
-| Botón1 (GPIO23) | Desde presentación: **salta a CUE3** (outro) y continúa a CUE4; luego loop sesión A **CUE4 → CUE5** |
+| Arranque | **Pausa en CUE2** (sin loop) |
+| Botón1 (GPIO23) | Desde presentación pausada: **play + salta a CUE3** (outro) y continúa a CUE4; luego loop sesión A **CUE4 → CUE5** |
 | Botón1 (2.ª pulsación) | En sesión A: loop sesión B **CUE6 → CUE7** |
-| Timer | Al vencer → **CUE8**; al llegar a **CUE9** → reinicio en **CUE1** |
-| Botón2 (GPIO24) | Siempre vuelve a **CUE1** (presentación) |
+| Timer | Al vencer → **CUE8**; al llegar a **CUE9** → **pausa en CUE2** |
 | Configuración | `config.json` (cuepoints + timer) |
 | Audio | En `config.json` (`audio.salida`, `audio.alsa_*`) con override por env vars |
 | Servicio | `video-control.service` → `multi-user.target` |
@@ -25,35 +24,29 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 ```mermaid
 stateDiagram-v2
     direction LR
-    Presentacion: Presentación\nloop CUE1-CUE2
+    Presentacion: Presentación pausada\nen CUE2
     Outro: OutroPresentacion\nCUE3 → CUE4
     SesionA: Sesión A\nloop CUE4-CUE5
     SesionB: Sesión B\nloop CUE6-CUE7
-    Finale: Finale\nCUE8 → CUE9 → CUE1
+    Finale: Finale\nCUE8 → CUE9
 
-    Presentacion --> Outro: Botón1
+    Presentacion --> Outro: Botón1 play + CUE3
     Outro --> SesionA: Llega a CUE4
     SesionA --> SesionB: Botón1 entra loop B
     SesionB --> SesionA: Botón1 vuelve a CUE4
     Outro --> Finale: Timer vence
     SesionA --> Finale: Timer vence
     SesionB --> Finale: Timer vence
-    Finale --> Presentacion: CUE9 reinicia en CUE1
-    Presentacion --> Presentacion: Botón2
-    Outro --> Presentacion: Botón2
-    SesionA --> Presentacion: Botón2
-    SesionB --> Presentacion: Botón2
-    Finale --> Presentacion: Botón2
+    Finale --> Presentacion: CUE9 pausa en CUE2
 ```
 
 ## Características
 
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
-- **Presentación al arrancar:** loop entre `cue1_ms` y `cue2_ms`.
-- **Botón1 (GPIO23):** desde presentación inicia timer y salta a `CUE3` (outro). Al pasar `CUE4` entra a loop de sesión A (`CUE4–CUE5`).
+- **Presentación al arrancar:** queda **pausada en `cue2_ms`** (sin loop CUE1–CUE2).
+- **Botón1 (GPIO23):** desde presentación pausada inicia timer, sale de pausa y salta a `CUE3` (outro). Al pasar `CUE4` entra a loop de sesión A (`CUE4–CUE5`).
 - **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE6–CUE7`; tercera pulsación sale del loop y vuelve a `CUE4`.
-- **Timer:** al vencer salta a `CUE8`; al llegar a `CUE9` reinicia en `CUE1` (presentación).
-- **Botón2 (GPIO24):** en cualquier momento seek a `cue1_ms` y cancela el timer.
+- **Timer:** al vencer salta a `CUE8`; al llegar a `CUE9` vuelve a **pausa en `CUE2`**.
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
 - Log en `control.log`; metadatos del video vía ffprobe al arrancar.
 - **Audio:** salida por **HDMI** o **placa externa** (USB/HAT) vía ALSA, configurable.
@@ -63,7 +56,7 @@ stateDiagram-v2
 - Raspberry Pi 5
 - Raspberry Pi OS con VLC y Python 3
 - HDMI conectado; MP4 en `/media/video1.mp4`
-- Dos botones entre GPIO y **GND** (pull-up interno en firmware)
+- Un botón entre GPIO23 y **GND** (pull-up interno en firmware)
 
 ```bash
 sudo apt update
@@ -91,8 +84,7 @@ sudo reboot
 
 | GPIO | Función |
 |------|---------|
-| **23** | Botón1 — sesión / escala loop |
-| **24** | Botón2 — vuelve a CUE1 (presentación) |
+| **23** | Botón1 — inicia sesión / escala loop |
 
 Conexión: un lado del botón al GPIO, el otro a **GND**.
 
@@ -109,8 +101,7 @@ python3 video_control.py
 
 | Botón | Acción |
 |-------|--------|
-| GPIO23 (botón1) | En presentación: timer + loop CUE3–CUE4. En sesión A: entra loop CUE6–CUE7. En sesión B: sale del loop y vuelve a CUE4 |
-| GPIO24 (botón2) | Siempre: vuelve a CUE1 y cancela timer |
+| GPIO23 (botón1) | En presentación pausada: play + timer + salto a CUE3. En sesión A: entra loop CUE6–CUE7. En sesión B: sale del loop y vuelve a CUE4 |
 
 ### Servicio systemd
 
@@ -137,15 +128,15 @@ Plantilla (`config.json.example`):
 | Campo | Descripción |
 |-------|-------------|
 | `video.path` | Archivo de video |
-| `cuepoints.cue1_ms` | Inicio presentación (loop con CUE2) |
-| `cuepoints.cue2_ms` | Fin presentación |
+| `cuepoints.cue1_ms` | Inicio de presentación (referencia; arranque pausa en CUE2) |
+| `cuepoints.cue2_ms` | Fin presentación / punto de pausa al arrancar y al volver desde CUE9 |
 | `cuepoints.cue3_ms` | Inicio de outro de presentación (salto por botón1) |
 | `cuepoints.cue4_ms` | Fin outro / inicio loop sesión A |
 | `cuepoints.cue5_ms` | Fin loop sesión A / inicio loop sesión B |
 | `cuepoints.cue6_ms` | Inicio loop sesión B |
 | `cuepoints.cue7_ms` | Fin loop sesión B |
 | `cuepoints.cue8_ms` | Salto al vencer el timer |
-| `cuepoints.cue9_ms` | Reinicio a CUE1 al llegar aquí (post-timer) |
+| `cuepoints.cue9_ms` | Al llegar aquí (post-timer) vuelve a pausa en CUE2 |
 | `timer_minutos` | Duración del timer tras botón1 |
 | `boton1_largo.segundos` | Umbral de pulsación larga para botón1 |
 | `boton1_largo.salir_app_segundos` | Umbral de pulsación muy larga para cerrar la app |
@@ -175,7 +166,7 @@ Al iniciar el servicio, `control.log` y journalctl muestran la config cargada y 
 
 ```
 INFO - Config cargada: video=/media/video1.mp4 | CUE1=20 CUE2=12000 ... | timer=5 min
-INFO - Iniciando reproducción (presentación CUE1-CUE2)...
+INFO - Iniciando reproducción (presentación pausada en CUE2)...
 INFO - Video: /media/video1.mp4
 INFO - Duración: 22356 ms (0:22) [ffprobe]
 ```
@@ -306,12 +297,11 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 
 ## Cómo funcionan los loops
 
-- **Presentación:** al arrancar, loop `CUE1 → CUE2` hasta que se pulse botón1.
-- **Outro presentación:** botón1 en presentación → seek a `CUE3`; el video continúa libre hasta `CUE4`.
+- **Presentación:** al arrancar, queda **pausada en `CUE2`** hasta que se pulse botón1.
+- **Outro presentación:** botón1 en presentación pausada → play + seek a `CUE3`; el video continúa libre hasta `CUE4`.
 - **Sesión A:** desde `CUE4`, loop `CUE4 → CUE5` mientras el timer siga activo.
 - **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE6 → CUE7`. Tercera pulsación → vuelve a `CUE4`.
-- **Finale:** timer vencido → seek a `CUE8`; al llegar a `CUE9` → reinicio en `CUE1` (presentación).
-- **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
+- **Finale:** timer vencido → seek a `CUE8`; al llegar a `CUE9` → **pausa en `CUE2`**.
 - **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
 - **Pulsación muy larga de botón1:** si se mantiene más de `boton1_largo.salir_app_segundos`, cierra la app.
 - **Overlay de confirmación:** al superar `boton1_largo.segundos` se muestra el texto de `boton1_largo.overlay.texto`, centrado y con tamaño configurable; al soltar se oculta.
@@ -323,7 +313,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.1.1
+├── VERSION               # 2.2.1
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -336,6 +326,13 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.2.1 (2026-06-29)
+
+- Presentación sin loop: arranque pausado en CUE2.
+- Botón1 en presentación pausada: play + salto a CUE3.
+- Al llegar a CUE9 vuelve a pausa en CUE2 (no reinicia en CUE1).
+- Eliminado botón2 (GPIO24) del flujo operativo.
 
 ### v2.1.1 (2026-06-28)
 

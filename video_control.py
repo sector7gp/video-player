@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.1.1"""
-__version__ = "2.1.1"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.1"""
+__version__ = "2.2.1"
 
 import json
 import os
@@ -416,7 +416,6 @@ BOTON1_LARGO_OVERLAY_SOMBRA_ROJA = bool(
 
 # GPIO (Raspberry Pi 5, chip 0) — pull-up interno, botón a GND
 GPIO_BOTON1 = 23
-GPIO_BOTON2 = 24
 
 # Configuración específica para Raspberry Pi 5
 try:
@@ -424,11 +423,8 @@ try:
     boton1 = Button(
         GPIO_BOTON1, pull_up=True, pin_factory=factory, bounce_time=0.05
     )
-    boton2 = Button(
-        GPIO_BOTON2, pull_up=True, pin_factory=factory, bounce_time=0.05
-    )
     logger.info(
-        f"GPIO{GPIO_BOTON1} (botón1) y GPIO{GPIO_BOTON2} (botón2) configurados "
+        f"GPIO{GPIO_BOTON1} (botón1) configurado "
         "con pull-up interno y filtro antirrebote."
     )
 except Exception as e:
@@ -503,13 +499,13 @@ posicion_guardada_ms = None
 esperando_seek = False
 ultimo_reintento_fin = 0.0
 momento_presion_boton1 = 0.0
-momento_presion_boton2 = 0.0
 ultimo_boton1 = 0.0
-ultimo_boton2 = 0.0
 boton1_hold_token = 0
 boton1_overlay_visible = False
 marquee_disponible = True
 salir_solicitado = threading.Event()
+pausar_al_completar_seek = False
+cue_pausa_destino_ms = None
 
 
 def asegurar_reproduciendo():
@@ -517,15 +513,36 @@ def asegurar_reproduciendo():
         player.play()
 
 
-def ir_a_tiempo(ms):
-    """Seek instantáneo; si el video terminó (Ended), stop breve y play."""
-    global esperando_seek
+def ir_a_tiempo(ms, reproducir=True):
+    """Seek instantáneo; si el video terminó (Ended), stop breve y play/pausa."""
+    global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms
     if player.get_state() in (vlc.State.Ended, vlc.State.Stopped):
         player.stop()
         time.sleep(0.03)
     player.set_time(ms)
     player.play()
+    if reproducir:
+        pausar_al_completar_seek = False
+        cue_pausa_destino_ms = None
+    else:
+        pausar_al_completar_seek = True
+        cue_pausa_destino_ms = int(ms)
     esperando_seek = True
+
+
+def _verificar_seek_pausa(current_time):
+    """Aplica pausa cuando el seek a cue_pausa_destino_ms terminó."""
+    global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms
+    if not esperando_seek or not pausar_al_completar_seek:
+        return
+    if cue_pausa_destino_ms is None or current_time < 0:
+        return
+    if abs(current_time - cue_pausa_destino_ms) <= TOLERANCIA_MS:
+        player.pause()
+        esperando_seek = False
+        pausar_al_completar_seek = False
+        cue_pausa_destino_ms = None
+        logger.info("Pausa aplicada tras seek.")
 
 
 def _timer_activo():
@@ -545,23 +562,28 @@ def _cancelar_timer():
     timer_fin = None
 
 
-def _cambiar_modo(nuevo_modo, ms_destino, motivo):
+def _cambiar_modo(nuevo_modo, ms_destino, motivo, reproducir=True):
     global modo, esperando_seek
     modo = nuevo_modo
     logger.info(f"Modo → {nuevo_modo} ({motivo}). Seek a {ms_destino} ms.")
-    ir_a_tiempo(ms_destino)
+    ir_a_tiempo(ms_destino, reproducir=reproducir)
 
 
-def ir_a_presentacion(motivo):
+def ir_a_presentacion_pausada(motivo):
     global posicion_guardada_ms
     posicion_guardada_ms = None
     _cancelar_timer()
-    _cambiar_modo(MODO_PRESENTACION, CUE1, motivo)
+    _cambiar_modo(
+        MODO_PRESENTACION,
+        CUE2,
+        motivo,
+        reproducir=False,
+    )
 
 
 def _loop_del_modo():
     if modo == MODO_PRESENTACION:
-        return CUE1, CUE2
+        return None, None
     if modo == MODO_OUTRO:
         return None, None
     if modo == MODO_SESION_A and _timer_activo():
@@ -602,6 +624,7 @@ def _verificar_transicion_outro(current_time):
 def _gestionar_loop(current_time, state):
     global esperando_seek, modo, ultimo_reintento_fin
 
+    _verificar_seek_pausa(current_time)
     _verificar_timer_vencido()
     _verificar_transicion_outro(current_time)
 
@@ -610,13 +633,13 @@ def _gestionar_loop(current_time, state):
             ahora = time.monotonic()
             if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
-                ir_a_presentacion(f"timer: CUE9 ({CUE9} ms) → reinicio en CUE1")
+                ir_a_presentacion_pausada(f"CUE9 ({CUE9} ms) → pausa en CUE2")
         elif state == vlc.State.Ended:
             ahora = time.monotonic()
             if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
-                logger.warning("Video en Ended durante finale; reinicio en CUE1.")
-                ir_a_presentacion("fin de video en finale")
+                logger.warning("Video en Ended durante finale; pausa en CUE2.")
+                ir_a_presentacion_pausada("fin de video en finale")
         return
 
     inicio, fin = _loop_del_modo()
@@ -833,28 +856,11 @@ def boton1_al_soltar():
     logger.info(f"GPIO23: pulsación ignorada en modo {modo}.")
 
 
-def registrar_presion_boton2():
-    global momento_presion_boton2
-    momento_presion_boton2 = time.monotonic()
-
-
-def boton2_al_soltar():
-    """Botón2: en cualquier momento vuelve a CUE1 (presentación)."""
-    global ultimo_boton2
-    duracion = time.monotonic() - momento_presion_boton2
-    if not _pulso_valido(duracion, ultimo_boton2, "GPIO24"):
-        return
-    ultimo_boton2 = time.monotonic()
-    ir_a_presentacion("botón2")
-
-
 boton1.when_pressed = registrar_presion_boton1
 boton1.when_released = boton1_al_soltar
-boton2.when_pressed = registrar_presion_boton2
-boton2.when_released = boton2_al_soltar
 
-logger.info("Iniciando reproducción (presentación CUE1-CUE2)...")
-ir_a_tiempo(CUE1)
+logger.info("Iniciando reproducción (presentación pausada en CUE2)...")
+ir_a_presentacion_pausada("inicio servicio")
 iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
 try:
