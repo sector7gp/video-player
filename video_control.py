@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.3"""
-__version__ = "2.2.3"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.4"""
+__version__ = "2.2.4"
 
 import json
 import os
@@ -508,7 +508,7 @@ salir_solicitado = threading.Event()
 pausar_al_completar_seek = False
 cue_pausa_destino_ms = None
 seek_pausa_desde = None
-ultimo_correccion_presentacion = 0.0
+presentacion_en_reposo = False
 
 
 
@@ -543,6 +543,7 @@ def ir_a_tiempo(ms, reproducir=True):
 def _verificar_seek_pausa(current_time):
     """Aplica pausa cuando el seek al cue objetivo terminó (o por timeout)."""
     global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms, seek_pausa_desde
+    global presentacion_en_reposo
     if not pausar_al_completar_seek or cue_pausa_destino_ms is None:
         return
 
@@ -569,21 +570,20 @@ def _verificar_seek_pausa(current_time):
     pausar_al_completar_seek = False
     cue_pausa_destino_ms = None
     seek_pausa_desde = None
+    global presentacion_en_reposo
+    presentacion_en_reposo = True
 
 
-def _mantener_presentacion_pausada(state):
-    """Red de seguridad: presentación no debe reproducir fuera del tramo CUE1→CUE2."""
-    global ultimo_correccion_presentacion
-    if modo != MODO_PRESENTACION or pausar_al_completar_seek:
+def _recuperar_presentacion_sin_pausa(current_time, state):
+    """Si se pasó CUE2 sin pausar, pausa in situ (sin reiniciar CUE1)."""
+    global presentacion_en_reposo
+    if modo != MODO_PRESENTACION or presentacion_en_reposo or pausar_al_completar_seek:
         return
-    if state not in (vlc.State.Playing, vlc.State.Buffering):
+    if state != vlc.State.Playing or current_time < CUE2 + TOLERANCIA_MS:
         return
-    ahora = time.monotonic()
-    if ahora - ultimo_correccion_presentacion < 1.0:
-        return
-    ultimo_correccion_presentacion = ahora
-    logger.warning("Presentación activa sin pausa; reiniciando CUE1→pausa CUE2.")
-    ir_a_presentacion_pausada("corrección presentación activa")
+    logger.warning(f"Presentación pasó CUE2 ({CUE2} ms) sin pausar; pausando in situ.")
+    _aplicar_pausa_en_cue(CUE2)
+    presentacion_en_reposo = True
 
 
 def _timer_activo():
@@ -613,8 +613,9 @@ def _cambiar_modo(nuevo_modo, ms_destino, motivo, reproducir=True):
 def ir_a_presentacion_pausada(motivo):
     """Reproduce desde CUE1 y pausa al llegar a CUE2 (frame decodificado, sin pantalla negra)."""
     global posicion_guardada_ms, modo, pausar_al_completar_seek, cue_pausa_destino_ms
-    global seek_pausa_desde, esperando_seek
+    global seek_pausa_desde, esperando_seek, presentacion_en_reposo
     posicion_guardada_ms = None
+    presentacion_en_reposo = False
     _cancelar_timer()
     modo = MODO_PRESENTACION
     logger.info(f"Modo → presentacion ({motivo}). Reproduce CUE1 y pausará en CUE2.")
@@ -688,7 +689,7 @@ def _gestionar_loop(current_time, state):
 
     inicio, fin = _loop_del_modo()
     if inicio is None:
-        _mantener_presentacion_pausada(state)
+        _recuperar_presentacion_sin_pausa(current_time, state)
         return
 
     if esperando_seek:
@@ -880,6 +881,9 @@ def boton1_al_soltar():
     ultimo_boton1 = time.monotonic()
 
     if modo == MODO_PRESENTACION:
+        if not presentacion_en_reposo:
+            logger.info("GPIO23: ignorado (presentación aún no pausada en CUE2).")
+            return
         posicion_guardada_ms = None
         _iniciar_timer()
         _cambiar_modo(MODO_OUTRO, CUE3, "botón1 en presentación (outro)")

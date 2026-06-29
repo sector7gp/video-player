@@ -313,7 +313,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.2.3
+├── VERSION               # 2.2.4
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -326,6 +326,10 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.2.4 (2026-06-29)
+
+- Elimina bucle de logs: ya no reinicia CUE1 tras pausar en CUE2 (VLC tarda en reportar Paused).
 
 ### v2.2.3 (2026-06-29)
 
