@@ -13,8 +13,8 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 | Video | `/media/video1.mp4` |
 | Arranque | Loop presentación **CUE1 → CUE2** |
 | Botón1 (GPIO23) | Desde presentación: **salta a CUE3** (outro) y continúa a CUE4; luego loop sesión A **CUE4 → CUE5** |
-| Botón1 (2.ª pulsación) | En sesión A: loop sesión B **CUE5 → CUE6** (guarda posición) |
-| Timer | Al vencer → **CUE7**; al llegar a **CUE8** → reinicio en **CUE1** |
+| Botón1 (2.ª pulsación) | En sesión A: loop sesión B **CUE6 → CUE7** (guarda posición) |
+| Timer | Al vencer → **CUE8**; al llegar a **CUE9** → reinicio en **CUE1** |
 | Botón2 (GPIO24) | Siempre vuelve a **CUE1** (presentación) |
 | Configuración | `config.json` (cuepoints + timer) |
 | Audio | En `config.json` (`audio.salida`, `audio.alsa_*`) con override por env vars |
@@ -28,8 +28,8 @@ stateDiagram-v2
     Presentacion: Presentación\nloop CUE1-CUE2
     Outro: OutroPresentacion\nCUE3 → CUE4
     SesionA: Sesión A\nloop CUE4-CUE5
-    SesionB: Sesión B\nloop CUE5-CUE6
-    Finale: Finale\nCUE7 → CUE8 → CUE1
+    SesionB: Sesión B\nloop CUE6-CUE7
+    Finale: Finale\nCUE8 → CUE9 → CUE1
 
     Presentacion --> Outro: Botón1
     Outro --> SesionA: Llega a CUE4
@@ -38,7 +38,7 @@ stateDiagram-v2
     Outro --> Finale: Timer vence
     SesionA --> Finale: Timer vence
     SesionB --> Finale: Timer vence
-    Finale --> Presentacion: CUE8 reinicia en CUE1
+    Finale --> Presentacion: CUE9 reinicia en CUE1
     Presentacion --> Presentacion: Botón2
     Outro --> Presentacion: Botón2
     SesionA --> Presentacion: Botón2
@@ -51,8 +51,8 @@ stateDiagram-v2
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
 - **Presentación al arrancar:** loop entre `cue1_ms` y `cue2_ms`.
 - **Botón1 (GPIO23):** desde presentación inicia timer y salta a `CUE3` (outro). Al pasar `CUE4` entra a loop de sesión A (`CUE4–CUE5`).
-- **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE5–CUE6` guardando posición; tercera pulsación restaura posición y vuelve a sesión A.
-- **Timer:** al vencer salta a `CUE7`; al llegar a `CUE8` reinicia en `CUE1` (presentación).
+- **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE6–CUE7` guardando posición; tercera pulsación restaura posición y vuelve a sesión A.
+- **Timer:** al vencer salta a `CUE8`; al llegar a `CUE9` reinicia en `CUE1` (presentación).
 - **Botón2 (GPIO24):** en cualquier momento seek a `cue1_ms` y cancela el timer.
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
 - Log en `control.log`; metadatos del video vía ffprobe al arrancar.
@@ -142,9 +142,10 @@ Plantilla (`config.json.example`):
 | `cuepoints.cue3_ms` | Inicio de outro de presentación (salto por botón1) |
 | `cuepoints.cue4_ms` | Fin outro / inicio loop sesión A |
 | `cuepoints.cue5_ms` | Fin loop sesión A / inicio loop sesión B |
-| `cuepoints.cue6_ms` | Fin loop sesión B |
-| `cuepoints.cue7_ms` | Salto al vencer el timer |
-| `cuepoints.cue8_ms` | Reinicio a CUE1 al llegar aquí (post-timer) |
+| `cuepoints.cue6_ms` | Inicio loop sesión B |
+| `cuepoints.cue7_ms` | Fin loop sesión B |
+| `cuepoints.cue8_ms` | Salto al vencer el timer |
+| `cuepoints.cue9_ms` | Reinicio a CUE1 al llegar aquí (post-timer) |
 | `timer_minutos` | Duración del timer tras botón1 |
 | `boton1_largo.segundos` | Umbral de pulsación larga para botón1 |
 | `boton1_largo.comando` | Comando a ejecutar en pulsación larga (recuperación) |
@@ -158,7 +159,7 @@ Plantilla (`config.json.example`):
 | `audio.alsa_hdmi` | Dispositivo ALSA HDMI |
 | `audio.alsa_externa` | Dispositivo ALSA externo (USB/HAT) |
 
-Los cuepoints deben ser **estrictamente crecientes**: CUE1 < CUE2 < … < CUE8.
+Los cuepoints deben ser **estrictamente crecientes**: CUE1 < CUE2 < … < CUE9.
 
 `git pull` no modifica tu `config.json` local. El instalador crea `config.json` desde la plantilla si no existe.
 
@@ -240,8 +241,8 @@ Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4
 - **Presentación:** al arrancar, loop `CUE1 → CUE2` hasta que se pulse botón1.
 - **Outro presentación:** botón1 en presentación → seek a `CUE3`; el video continúa libre hasta `CUE4`.
 - **Sesión A:** desde `CUE4`, loop `CUE4 → CUE5` mientras el timer siga activo.
-- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE5 → CUE6` (guarda posición). Tercera pulsación → restaura posición y vuelve a sesión A.
-- **Finale:** timer vencido → seek a `CUE7`; al llegar a `CUE8` → reinicio en `CUE1` (presentación).
+- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE6 → CUE7` (guarda posición). Tercera pulsación → restaura posición y vuelve a sesión A.
+- **Finale:** timer vencido → seek a `CUE8`; al llegar a `CUE9` → reinicio en `CUE1` (presentación).
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 - **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
 - **Overlay de confirmación:** al superar `boton1_largo.segundos` se muestra el texto de `boton1_largo.overlay.texto`, centrado y con tamaño configurable; al soltar se oculta.
@@ -253,7 +254,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.1.0
+├── VERSION               # 2.1.1
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -266,6 +267,11 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.1.1 (2026-06-28)
+
+- Sección A y sección B ahora usan extremos independientes (sin compartir cuepoints).
+- Renumeración: sesión A `CUE4–CUE5`, sesión B `CUE6–CUE7`, timer `CUE8`, reinicio en `CUE9`.
 
 ### v2.1.0 (2026-06-28)
 
