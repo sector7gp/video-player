@@ -824,9 +824,9 @@ def boton1_al_soltar():
     if modo == MODO_SESION_B and _timer_activo():
         posicion_guardada_ms = None
         _cambiar_modo(
-            MODO_OUTRO,
-            CUE3,
-            "botón1 en sesión B (sale del loop y vuelve a CUE3)",
+            MODO_SESION_A,
+            CUE4,
+            "botón1 en sesión B (sale del loop y vuelve a CUE4)",
         )
         return
 

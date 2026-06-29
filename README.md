@@ -34,7 +34,7 @@ stateDiagram-v2
     Presentacion --> Outro: Botón1
     Outro --> SesionA: Llega a CUE4
     SesionA --> SesionB: Botón1 entra loop B
-    SesionB --> Outro: Botón1 vuelve a CUE3
+    SesionB --> SesionA: Botón1 vuelve a CUE4
     Outro --> Finale: Timer vence
     SesionA --> Finale: Timer vence
     SesionB --> Finale: Timer vence
@@ -51,7 +51,7 @@ stateDiagram-v2
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
 - **Presentación al arrancar:** loop entre `cue1_ms` y `cue2_ms`.
 - **Botón1 (GPIO23):** desde presentación inicia timer y salta a `CUE3` (outro). Al pasar `CUE4` entra a loop de sesión A (`CUE4–CUE5`).
-- **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE6–CUE7`; tercera pulsación sale del loop y vuelve a `CUE3`.
+- **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE6–CUE7`; tercera pulsación sale del loop y vuelve a `CUE4`.
 - **Timer:** al vencer salta a `CUE8`; al llegar a `CUE9` reinicia en `CUE1` (presentación).
 - **Botón2 (GPIO24):** en cualquier momento seek a `cue1_ms` y cancela el timer.
 - Antirebote hardware (50 ms) y software (400 ms entre pulsaciones).
@@ -109,7 +109,7 @@ python3 video_control.py
 
 | Botón | Acción |
 |-------|--------|
-| GPIO23 (botón1) | En presentación: timer + loop CUE3–CUE4. En sesión A: entra loop CUE6–CUE7. En sesión B: sale del loop y vuelve a CUE3 |
+| GPIO23 (botón1) | En presentación: timer + loop CUE3–CUE4. En sesión A: entra loop CUE6–CUE7. En sesión B: sale del loop y vuelve a CUE4 |
 | GPIO24 (botón2) | Siempre: vuelve a CUE1 y cancela timer |
 
 ### Servicio systemd
@@ -309,7 +309,7 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 - **Presentación:** al arrancar, loop `CUE1 → CUE2` hasta que se pulse botón1.
 - **Outro presentación:** botón1 en presentación → seek a `CUE3`; el video continúa libre hasta `CUE4`.
 - **Sesión A:** desde `CUE4`, loop `CUE4 → CUE5` mientras el timer siga activo.
-- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE6 → CUE7`. Tercera pulsación → vuelve a `CUE3`.
+- **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE6 → CUE7`. Tercera pulsación → vuelve a `CUE4`.
 - **Finale:** timer vencido → seek a `CUE8`; al llegar a `CUE9` → reinicio en `CUE1` (presentación).
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 - **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
