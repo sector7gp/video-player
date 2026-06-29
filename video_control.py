@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.4"""
-__version__ = "2.2.4"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.5"""
+__version__ = "2.2.5"
 
 import json
 import os
@@ -521,23 +521,43 @@ def _aplicar_pausa_en_cue(ms):
     logger.info(f"Pausa aplicada cerca de {ms} ms (posición reportada: {t} ms).")
 
 
+def _presentacion_lista_para_boton():
+    """True si la presentación terminó en CUE2 y puede arrancar sesión con botón1."""
+    if pausar_al_completar_seek:
+        return False
+    if presentacion_en_reposo:
+        return True
+    t = player.get_time()
+    if player.get_state() == vlc.State.Paused and t >= 0 and t >= CUE2 - TOLERANCIA_MS:
+        return True
+    return False
+
+
 def ir_a_tiempo(ms, reproducir=True):
     """Seek instantáneo; si el video terminó (Ended), stop breve y play/pausa."""
     global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms, seek_pausa_desde
+    global presentacion_en_reposo
     if player.get_state() in (vlc.State.Ended, vlc.State.Stopped):
         player.stop()
         time.sleep(0.03)
+    # VLC/Pi no aplica seek fiable en Paused: hay que reanudar antes.
+    if player.get_state() == vlc.State.Paused:
+        player.set_pause(0)
+        time.sleep(0.02)
     player.set_time(ms)
     player.play()
     if reproducir:
         pausar_al_completar_seek = False
         cue_pausa_destino_ms = None
         seek_pausa_desde = None
+        presentacion_en_reposo = False
     else:
         pausar_al_completar_seek = True
         cue_pausa_destino_ms = int(ms)
         seek_pausa_desde = time.monotonic()
     esperando_seek = True
+    if reproducir and player.get_state() != vlc.State.Playing:
+        player.set_pause(0)
 
 
 def _verificar_seek_pausa(current_time):
@@ -570,7 +590,6 @@ def _verificar_seek_pausa(current_time):
     pausar_al_completar_seek = False
     cue_pausa_destino_ms = None
     seek_pausa_desde = None
-    global presentacion_en_reposo
     presentacion_en_reposo = True
 
 
@@ -881,10 +900,11 @@ def boton1_al_soltar():
     ultimo_boton1 = time.monotonic()
 
     if modo == MODO_PRESENTACION:
-        if not presentacion_en_reposo:
+        if not _presentacion_lista_para_boton():
             logger.info("GPIO23: ignorado (presentación aún no pausada en CUE2).")
             return
         posicion_guardada_ms = None
+        presentacion_en_reposo = False
         _iniciar_timer()
         _cambiar_modo(MODO_OUTRO, CUE3, "botón1 en presentación (outro)")
         return

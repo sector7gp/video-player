@@ -313,7 +313,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.2.4
+├── VERSION               # 2.2.5
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -326,6 +326,10 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.2.5 (2026-06-29)
+
+- Botón1 en presentación: reanuda VLC antes del seek a CUE3 (seek en Paused fallaba en Pi).
 
 ### v2.2.4 (2026-06-29)
 
