@@ -313,7 +313,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.2.1
+├── VERSION               # 2.2.2
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -326,6 +326,10 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.2.2 (2026-06-29)
+
+- Corrige pausa en CUE2: tolerancia al pasar el cue, timeout de seek y espera inicial de VLC.
 
 ### v2.2.1 (2026-06-29)
 

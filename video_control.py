@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.1"""
-__version__ = "2.2.1"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.2"""
+__version__ = "2.2.2"
 
 import json
 import os
@@ -484,6 +484,7 @@ except Exception as e:
     sys.exit(1)
 
 TOLERANCIA_MS = 80
+SEEK_PAUSA_TIMEOUT_S = 5.0
 DEBOUNCE_BOTON_S = 0.40
 PULSO_MINIMO_S = 0.05
 
@@ -506,16 +507,37 @@ marquee_disponible = True
 salir_solicitado = threading.Event()
 pausar_al_completar_seek = False
 cue_pausa_destino_ms = None
+seek_pausa_desde = None
+ultimo_correccion_presentacion = 0.0
 
 
-def asegurar_reproduciendo():
-    if player.get_state() != vlc.State.Playing:
+def _esperar_vlc_listo(timeout_s=10.0):
+    """Espera a que VLC reporte tiempo válido tras cargar el media."""
+    if player.get_state() in (vlc.State.NothingSpecial, vlc.State.Stopped):
         player.play()
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if player.get_time() >= 0:
+            return True
+        time.sleep(0.05)
+    logger.warning("VLC no reportó tiempo válido tras espera inicial.")
+    return False
+
+
+def _aplicar_pausa_en_cue(ms):
+    """Pausa y corrige posición si VLC se pasó del cue objetivo."""
+    player.pause()
+    if player.get_state() != vlc.State.Paused:
+        player.set_pause(1)
+    t = player.get_time()
+    if t >= 0 and abs(t - ms) > TOLERANCIA_MS:
+        player.set_time(ms)
+    logger.info(f"Pausa aplicada en {ms} ms (posición reportada: {t} ms).")
 
 
 def ir_a_tiempo(ms, reproducir=True):
     """Seek instantáneo; si el video terminó (Ended), stop breve y play/pausa."""
-    global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms
+    global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms, seek_pausa_desde
     if player.get_state() in (vlc.State.Ended, vlc.State.Stopped):
         player.stop()
         time.sleep(0.03)
@@ -524,25 +546,58 @@ def ir_a_tiempo(ms, reproducir=True):
     if reproducir:
         pausar_al_completar_seek = False
         cue_pausa_destino_ms = None
+        seek_pausa_desde = None
     else:
         pausar_al_completar_seek = True
         cue_pausa_destino_ms = int(ms)
+        seek_pausa_desde = time.monotonic()
     esperando_seek = True
 
 
 def _verificar_seek_pausa(current_time):
-    """Aplica pausa cuando el seek a cue_pausa_destino_ms terminó."""
-    global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms
-    if not esperando_seek or not pausar_al_completar_seek:
+    """Aplica pausa cuando el seek al cue objetivo terminó (o por timeout)."""
+    global esperando_seek, pausar_al_completar_seek, cue_pausa_destino_ms, seek_pausa_desde
+    if not pausar_al_completar_seek or cue_pausa_destino_ms is None:
         return
-    if cue_pausa_destino_ms is None or current_time < 0:
+
+    destino = cue_pausa_destino_ms
+    timed_out = (
+        seek_pausa_desde is not None
+        and time.monotonic() - seek_pausa_desde >= SEEK_PAUSA_TIMEOUT_S
+    )
+
+    listo = timed_out
+    if current_time >= 0 and current_time >= destino - TOLERANCIA_MS:
+        listo = True
+
+    if not listo:
         return
-    if abs(current_time - cue_pausa_destino_ms) <= TOLERANCIA_MS:
-        player.pause()
-        esperando_seek = False
-        pausar_al_completar_seek = False
-        cue_pausa_destino_ms = None
-        logger.info("Pausa aplicada tras seek.")
+
+    if timed_out and (current_time < 0 or current_time < destino - TOLERANCIA_MS):
+        logger.warning(
+            f"Timeout seek-pausa ({SEEK_PAUSA_TIMEOUT_S}s); forzando pausa en {destino} ms."
+        )
+
+    _aplicar_pausa_en_cue(destino)
+    esperando_seek = False
+    pausar_al_completar_seek = False
+    cue_pausa_destino_ms = None
+    seek_pausa_desde = None
+
+
+def _mantener_presentacion_pausada(state):
+    """Red de seguridad: presentación no debe reproducir fuera del seek-pausa."""
+    global ultimo_correccion_presentacion
+    if modo != MODO_PRESENTACION or pausar_al_completar_seek:
+        return
+    if state not in (vlc.State.Playing, vlc.State.Buffering):
+        return
+    ahora = time.monotonic()
+    if ahora - ultimo_correccion_presentacion < 1.0:
+        return
+    ultimo_correccion_presentacion = ahora
+    logger.warning("Presentación activa sin pausa; corrigiendo seek a CUE2.")
+    ir_a_tiempo(CUE2, reproducir=False)
 
 
 def _timer_activo():
@@ -644,6 +699,7 @@ def _gestionar_loop(current_time, state):
 
     inicio, fin = _loop_del_modo()
     if inicio is None:
+        _mantener_presentacion_pausada(state)
         return
 
     if esperando_seek:
@@ -860,6 +916,7 @@ boton1.when_pressed = registrar_presion_boton1
 boton1.when_released = boton1_al_soltar
 
 logger.info("Iniciando reproducción (presentación pausada en CUE2)...")
+_esperar_vlc_listo()
 ir_a_presentacion_pausada("inicio servicio")
 iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
