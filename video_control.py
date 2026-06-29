@@ -1,13 +1,12 @@
-"""Control de video ffplay + GPIO para Raspberry Pi 5 — v2.2.0"""
-__version__ = "2.2.0"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.1.1"""
+__version__ = "2.1.1"
 
 import json
 import os
-import shlex
-import shutil
 import subprocess
 import sys
 import threading
+import vlc
 import time
 import logging
 from gpiozero import Button
@@ -102,8 +101,7 @@ def _log_resumen_config(cfg):
         f"CUE7={cues['cue7_ms']} CUE8={cues['cue8_ms']} CUE9={cues['cue9_ms']} ms | "
         f"timer={cfg['timer_minutos']} min | "
         f"audio={audio['salida']} | "
-        f"boton1_largo={cfg['boton1_largo']['segundos']}s | "
-        f"salir_app={cfg['boton1_largo']['salir_app_segundos']}s"
+        f"boton1_largo={cfg['boton1_largo']['segundos']}s"
     )
 
 
@@ -249,6 +247,36 @@ def formatear_duracion(ms):
     return f"{minutos}:{segundos:02d}"
 
 
+METADATA_WAIT_S = 3.0
+
+
+def _duracion_reproductor(player):
+    """Obtiene duración desde el reproductor activo."""
+    try:
+        ms = player.get_length()
+        if ms and ms > 0:
+            return ms
+    except Exception:
+        pass
+    return -1
+
+
+def _log_pistas_reproductor(player):
+    """Fallback: dimensiones y fps desde el reproductor en reproducción."""
+    try:
+        ancho = player.video_get_width()
+        alto = player.video_get_height()
+        if ancho > 0 and alto > 0:
+            fps = player.get_fps() or 0.0
+            logger.info(
+                f"Pista video: {ancho}x{alto} @ {fps:.2f} fps (desde reproductor)"
+            )
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _fps_desde_ffprobe(valor):
     if not valor or "/" not in valor:
         return 0.0
@@ -261,8 +289,8 @@ def _fps_desde_ffprobe(valor):
         return 0.0
 
 
-def _ffprobe_json(path):
-    """Lee metadata JSON con ffprobe. Devuelve dict o None."""
+def _log_ffprobe(path):
+    """Fallback con ffprobe si está instalado. Devuelve True si logueó datos."""
     try:
         proc = subprocess.run(
             [
@@ -275,31 +303,23 @@ def _ffprobe_json(path):
             check=False,
         )
     except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        return None
+        return False
 
     if proc.returncode != 0 or not proc.stdout.strip():
-        return None
+        return False
 
     try:
-        return json.loads(proc.stdout)
+        data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return None
+        return False
 
-
-def _log_ffprobe(path):
-    """Loguea metadata via ffprobe. Devuelve duración en ms o -1."""
-    data = _ffprobe_json(path)
-    if not data:
-        return -1
-
-    duracion_ms = -1
+    logueado = False
     fmt = data.get("format", {})
     duracion_s = float(fmt.get("duration", 0) or 0)
     if duracion_s > 0:
-        duracion_ms = int(duracion_s * 1000)
-        logger.info(
-            f"Duración: {duracion_ms} ms ({formatear_duracion(duracion_ms)}) [ffprobe]"
-        )
+        ms = int(duracion_s * 1000)
+        logger.info(f"Duración: {ms} ms ({formatear_duracion(ms)}) [ffprobe]")
+        logueado = True
 
     for stream in data.get("streams", []):
         tipo = stream.get("codec_type")
@@ -311,35 +331,53 @@ def _log_ffprobe(path):
             logger.info(
                 f"Pista video: {codec} {ancho}x{alto} @ {fps:.2f} fps [ffprobe]"
             )
+            logueado = True
         elif tipo == "audio":
             rate = stream.get("sample_rate", "?")
             canales = stream.get("channels", "?")
             logger.info(
                 f"Pista audio: {codec} {rate} Hz, {canales} canales [ffprobe]"
             )
-    return duracion_ms
+            logueado = True
+    return logueado
 
 
-def _recolectar_y_loguear_metadatos(path):
-    """Registra metadatos del video para troubleshooting."""
-    global video_duracion_ms
+def _recolectar_y_loguear_metadatos(path, player):
+    """Registra metadatos sin tocar ctypes/VLC extra (evita segfault en Pi)."""
     logger.info(f"Video: {path}")
-    duracion = _log_ffprobe(path)
-    if duracion > 0:
-        video_duracion_ms = duracion
-    else:
+
+    if _log_ffprobe(path):
+        return
+
+    tiene_duracion = False
+    deadline = time.monotonic() + METADATA_WAIT_S
+    while time.monotonic() < deadline:
+        duracion = _duracion_reproductor(player)
+        if duracion > 0:
+            logger.info(
+                f"Duración: {duracion} ms ({formatear_duracion(duracion)})"
+            )
+            tiene_duracion = True
+            break
+        time.sleep(0.1)
+
+    tiene_pistas = _log_pistas_reproductor(player)
+
+    if not tiene_duracion:
+        logger.warning("Duración del video no disponible.")
+    if not tiene_pistas:
         logger.warning(
             "Especificaciones de pistas no disponibles. "
             "Instalá ffmpeg para logs completos: sudo apt install -y ffmpeg"
         )
 
 
-def iniciar_log_metadatos_en_background(path):
+def iniciar_log_metadatos_en_background(path, player):
     """Lanza la lectura de metadatos en un hilo aparte para no frenar play()."""
 
     def trabajo():
         try:
-            _recolectar_y_loguear_metadatos(path)
+            _recolectar_y_loguear_metadatos(path, player)
         except Exception as e:
             logger.warning(f"Error al leer metadatos del video: {e}")
 
@@ -413,41 +451,41 @@ def _resolver_audio(config):
 AUDIO_SALIDA, ALSA_HDMI, ALSA_EXTERNA = _resolver_audio(config)
 
 
-def _normalizar_alsa_para_sdl(device):
-    """Convierte plughw:CARD=xxx,DEV=y a plughw:xxx,y para AUDIODEV."""
-    raw = (device or "").strip()
-    if "CARD=" in raw and "DEV=" in raw:
-        try:
-            prefijo, resto = raw.split(":", 1)
-            partes = [p.strip() for p in resto.split(",") if p.strip()]
-            kv = {}
-            for parte in partes:
-                k, v = parte.split("=", 1)
-                kv[k.strip().upper()] = v.strip()
-            card = kv.get("CARD")
-            dev = kv.get("DEV")
-            if card and dev:
-                return f"{prefijo}:{card},{dev}"
-        except Exception:
-            return raw
-    return raw
-
-
-def opciones_ffplay():
-    """Resuelve device de audio y etiqueta para ffplay/SDL."""
+def opciones_vlc():
+    """Opciones de instancia VLC (video + audio ALSA)."""
+    opts = ["--input-repeat=-1", "--aout=alsa"]
     if AUDIO_SALIDA == "externa":
-        device = _normalizar_alsa_para_sdl(ALSA_EXTERNA)
+        device = ALSA_EXTERNA
         etiqueta = "placa externa"
     elif AUDIO_SALIDA == "hdmi":
-        device = _normalizar_alsa_para_sdl(ALSA_HDMI)
+        device = ALSA_HDMI
         etiqueta = "HDMI"
     else:
         logger.warning(
             f"AUDIO_SALIDA='{AUDIO_SALIDA}' no válido (use hdmi o externa). Usando HDMI."
         )
-        device = _normalizar_alsa_para_sdl(ALSA_HDMI)
+        device = ALSA_HDMI
         etiqueta = "HDMI (fallback)"
-    return device, etiqueta
+    opts.append(f"--alsa-audio-device={device}")
+    return opts, device, etiqueta
+
+
+# Inicializar VLC (configuración mínima, sin vout=drm ni opciones extra)
+try:
+    vlc_args, alsa_device, audio_etiqueta = opciones_vlc()
+    instance = vlc.Instance(" ".join(vlc_args))
+    player = instance.media_player_new()
+    media = instance.media_new(PATH_VIDEO)
+    media.add_option(":input-repeat=-1")
+    media.add_option(":aout=alsa")
+    media.add_option(f":alsa-audio-device={alsa_device}")
+    player.set_media(media)
+
+    logger.info(f"VLC inicializado con el video: {PATH_VIDEO}")
+    logger.info(f"Audio: {audio_etiqueta} ({alsa_device})")
+except Exception as e:
+    logger.error(f"Error al inicializar VLC: {e}")
+    sys.exit(1)
 
 TOLERANCIA_MS = 80
 DEBOUNCE_BOTON_S = 0.40
@@ -470,135 +508,23 @@ ultimo_boton1 = 0.0
 ultimo_boton2 = 0.0
 boton1_hold_token = 0
 boton1_overlay_visible = False
+marquee_disponible = True
 salir_solicitado = threading.Event()
 
-FFPLAY_BIN = os.environ.get("FFPLAY_BIN", "ffplay").strip() or "ffplay"
-FFPLAY_LOGLEVEL = os.environ.get("FFPLAY_LOGLEVEL", "warning").strip() or "warning"
-FFPLAY_EXTRA_ARGS = shlex.split(os.environ.get("FFPLAY_EXTRA_ARGS", "").strip())
 
-alsa_device, audio_etiqueta = opciones_ffplay()
-ffplay_env = dict(os.environ)
-ffplay_env["SDL_AUDIODRIVER"] = "alsa"
-ffplay_env["AUDIODEV"] = alsa_device
-
-player_process = None
-player_lock = threading.Lock()
-player_esperado_activo = False
-player_anchor_ms = 0
-player_anchor_monotonic = None
-
-video_duracion_ms = -1
-
-PLAYER_STATE_PLAYING = "playing"
-PLAYER_STATE_ENDED = "ended"
-PLAYER_STATE_STOPPED = "stopped"
-
-
-def _ffplay_disponible():
-    if "/" in FFPLAY_BIN:
-        return os.path.isfile(FFPLAY_BIN) and os.access(FFPLAY_BIN, os.X_OK)
-    return shutil.which(FFPLAY_BIN) is not None
-
-
-def _comando_ffplay(start_ms):
-    return [
-        FFPLAY_BIN,
-        "-hide_banner",
-        "-loglevel",
-        FFPLAY_LOGLEVEL,
-        "-nostats",
-        "-autoexit",
-        "-fs",
-        "-sync",
-        "audio",
-        "-ss",
-        f"{max(0, int(start_ms)) / 1000:.3f}",
-        *FFPLAY_EXTRA_ARGS,
-        PATH_VIDEO,
-    ]
-
-
-def _detener_ffplay_locked():
-    global player_process
-    if player_process is None:
-        return
-    if player_process.poll() is None:
-        player_process.terminate()
-        try:
-            player_process.wait(timeout=1.5)
-        except subprocess.TimeoutExpired:
-            player_process.kill()
-            try:
-                player_process.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                pass
-    player_process = None
-
-
-def stop_player():
-    """Detiene el proceso ffplay actual."""
-    global player_esperado_activo, player_anchor_monotonic
-    with player_lock:
-        player_esperado_activo = False
-        player_anchor_monotonic = None
-        _detener_ffplay_locked()
-
-
-def play_from(ms):
-    """Reinicia ffplay desde un offset en ms."""
-    global player_process, player_esperado_activo, player_anchor_ms, player_anchor_monotonic
-    cmd = _comando_ffplay(ms)
-    with player_lock:
-        _detener_ffplay_locked()
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=ffplay_env,
-                start_new_session=True,
-            )
-        except Exception as e:
-            logger.error(f"No se pudo lanzar ffplay: {e}")
-            raise
-        player_esperado_activo = True
-        player_anchor_ms = max(0, int(ms))
-        player_anchor_monotonic = time.monotonic()
-        player_process = proc
-
-
-def current_time_ms():
-    """Tiempo de reproducción estimado usando reloj monotónico."""
-    with player_lock:
-        if not player_esperado_activo or player_anchor_monotonic is None:
-            return -1
-        estimado = int(
-            player_anchor_ms + (time.monotonic() - player_anchor_monotonic) * 1000
-        )
-    if video_duracion_ms > 0:
-        return min(estimado, video_duracion_ms)
-    return estimado
-
-
-def is_running():
-    """Indica si ffplay sigue activo."""
-    with player_lock:
-        return player_process is not None and player_process.poll() is None
-
-
-def player_state():
-    if not is_running():
-        if player_esperado_activo:
-            return PLAYER_STATE_ENDED
-        return PLAYER_STATE_STOPPED
-    return PLAYER_STATE_PLAYING
+def asegurar_reproduciendo():
+    if player.get_state() != vlc.State.Playing:
+        player.play()
 
 
 def ir_a_tiempo(ms):
-    """Seek por relanzamiento de ffplay desde el tiempo solicitado."""
+    """Seek instantáneo; si el video terminó (Ended), stop breve y play."""
     global esperando_seek
-    play_from(ms)
+    if player.get_state() in (vlc.State.Ended, vlc.State.Stopped):
+        player.stop()
+        time.sleep(0.03)
+    player.set_time(ms)
+    player.play()
     esperando_seek = True
 
 
@@ -685,7 +611,7 @@ def _gestionar_loop(current_time, state):
             if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
                 ir_a_presentacion(f"timer: CUE9 ({CUE9} ms) → reinicio en CUE1")
-        elif state == PLAYER_STATE_ENDED:
+        elif state == vlc.State.Ended:
             ahora = time.monotonic()
             if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
@@ -708,7 +634,7 @@ def _gestionar_loop(current_time, state):
     if current_time >= fin:
         esperando_seek = True
         logger.info(f"Loop {modo}: {current_time} ms ≥ {fin} ms → {inicio} ms.")
-        ir_a_tiempo(inicio)
+        player.set_time(inicio)
 
 
 def _pulso_valido(duracion, ultimo, nombre):
@@ -735,20 +661,70 @@ def registrar_presion_boton1():
 
 
 def _set_marquee_visible(show, text=BOTON1_LARGO_OVERLAY_TEXTO):
-    """Compatibilidad de interfaz: ffplay no soporta marquee dinámico."""
-    if show:
-        logger.info(
-            "Overlay omitido en backend ffplay: no hay soporte marquee en esta fase."
-        )
-    return False
+    """Muestra/oculta texto overlay usando marquee de VLC."""
+    global marquee_disponible
+    if not marquee_disponible:
+        return False
+    try:
+        option = vlc.VideoMarqueeOption
+        if show:
+            player.video_set_marquee_string(option.Text, text)
+            # Estas opciones pueden no existir o no estar soportadas en todas las builds.
+            try:
+                player.video_set_marquee_int(option.Size, BOTON1_LARGO_OVERLAY_TAMANO)
+            except Exception:
+                pass
+            try:
+                player.video_set_marquee_int(option.Color, BOTON1_LARGO_OVERLAY_COLOR)
+            except Exception:
+                pass
+            try:
+                player.video_set_marquee_int(option.Opacity, BOTON1_LARGO_OVERLAY_OPACIDAD)
+            except Exception:
+                pass
+            if BOTON1_LARGO_OVERLAY_CENTRADO:
+                try:
+                    pos_enum = getattr(vlc, "Position", None)
+                    pos_center = None
+                    if pos_enum is not None:
+                        pos_center = (
+                            getattr(pos_enum, "center", None)
+                            or getattr(pos_enum, "Center", None)
+                        )
+                    if pos_center is not None:
+                        player.video_set_marquee_int(option.Position, int(pos_center))
+                    else:
+                        # Fallback compatible: centrar por coordenadas cuando Position no existe.
+                        player.video_set_marquee_int(option.X, 0)
+                        player.video_set_marquee_int(option.Y, 0)
+                except Exception:
+                    pass
+            player.video_set_marquee_int(option.Timeout, 0)
+            player.video_set_marquee_int(option.Enable, 1)
+        else:
+            try:
+                player.video_set_marquee_int(option.Enable, 0)
+            except Exception:
+                pass
+        return True
+    except Exception as e:
+        marquee_disponible = False
+        logger.warning(f"Overlay marquee no disponible en este entorno VLC: {e}")
+        return False
 
 
 def _mostrar_overlay_boton1_largo():
     global boton1_overlay_visible
     if boton1_overlay_visible:
         return
-    _set_marquee_visible(True)
-    boton1_overlay_visible = True
+    if BOTON1_LARGO_OVERLAY_SOMBRA_ROJA:
+        logger.info(
+            "Overlay: 'sombra_roja' solicitada. VLC marquee no soporta fondo/sombra real; "
+            "se aplica color y opacidad configurados."
+        )
+    if _set_marquee_visible(True):
+        boton1_overlay_visible = True
+        logger.info("Overlay mostrado: SOLTAR PARA / REINICIAR")
 
 
 def _ocultar_overlay_boton1_largo():
@@ -757,6 +733,7 @@ def _ocultar_overlay_boton1_largo():
         return
     _set_marquee_visible(False)
     boton1_overlay_visible = False
+    logger.info("Overlay ocultado.")
 
 
 def _monitor_pulsacion_larga_boton1(token, inicio):
@@ -841,7 +818,7 @@ def boton1_al_soltar():
         return
 
     if modo == MODO_SESION_A and _timer_activo():
-        current = current_time_ms()
+        current = player.get_time()
         posicion_guardada_ms = current if current >= 0 else 0
         _cambiar_modo(MODO_SESION_B, CUE6, "botón1 dentro del timer (CUE6-CUE7)")
         logger.info(f"Posición guardada: {posicion_guardada_ms} ms.")
@@ -882,31 +859,22 @@ boton1.when_released = boton1_al_soltar
 boton2.when_pressed = registrar_presion_boton2
 boton2.when_released = boton2_al_soltar
 
-if not _ffplay_disponible():
-    logger.error(
-        f"No se encontró ejecutable ffplay ('{FFPLAY_BIN}'). "
-        "Instalá ffmpeg: sudo apt install -y ffmpeg"
-    )
-    sys.exit(1)
-
-logger.info(f"Backend de reproducción: ffplay ({FFPLAY_BIN})")
-logger.info(f"Audio: {audio_etiqueta} ({alsa_device})")
 logger.info("Iniciando reproducción (presentación CUE1-CUE2)...")
 ir_a_tiempo(CUE1)
-iniciar_log_metadatos_en_background(PATH_VIDEO)
+iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
 try:
     while True:
         if salir_solicitado.is_set():
             logger.info("Salida solicitada por botón1 (pulsación > umbral).")
             break
-        state = player_state()
-        current_time = current_time_ms()
+        state = player.get_state()
+        current_time = player.get_time()
         _gestionar_loop(current_time, state)
         time.sleep(0.05)
 
 except KeyboardInterrupt:
     logger.info("Interrupción por teclado detectada. Saliendo de la aplicación...")
 finally:
-    stop_player()
+    player.stop()
     logger.info("Programa finalizado.")

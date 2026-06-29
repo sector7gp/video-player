@@ -19,10 +19,6 @@ if [[ ! -f "${PROJECT_DIR}/video_control.py" ]]; then
   exit 1
 fi
 
-if ! command -v ffplay >/dev/null 2>&1; then
-  echo "AVISO: ffplay no está instalado. Instalá ffmpeg: sudo apt install -y ffmpeg"
-fi
-
 if [[ ! -f "${PROJECT_DIR}/config.json" ]]; then
   if [[ -f "${PROJECT_DIR}/config.json.example" ]]; then
     cp "${PROJECT_DIR}/config.json.example" "${PROJECT_DIR}/config.json"
