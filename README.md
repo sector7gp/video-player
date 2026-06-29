@@ -43,7 +43,7 @@ stateDiagram-v2
 ## Características
 
 - Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
-- **Presentación al arrancar:** queda **pausada en `cue2_ms`** (sin loop CUE1–CUE2).
+- **Presentación al arrancar:** reproduce **CUE1 → CUE2** y queda pausada en `cue2_ms`.
 - **Botón1 (GPIO23):** desde presentación pausada inicia timer, sale de pausa y salta a `CUE3` (outro). Al pasar `CUE4` entra a loop de sesión A (`CUE4–CUE5`).
 - **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE6–CUE7`; tercera pulsación sale del loop y vuelve a `CUE4`.
 - **Timer:** al vencer salta a `CUE8`; al llegar a `CUE9` vuelve a **pausa en `CUE2`**.
@@ -128,7 +128,7 @@ Plantilla (`config.json.example`):
 | Campo | Descripción |
 |-------|-------------|
 | `video.path` | Archivo de video |
-| `cuepoints.cue1_ms` | Inicio de presentación (referencia; arranque pausa en CUE2) |
+| `cuepoints.cue1_ms` | Inicio presentación (reproduce desde aquí hacia CUE2) |
 | `cuepoints.cue2_ms` | Fin presentación / punto de pausa al arrancar y al volver desde CUE9 |
 | `cuepoints.cue3_ms` | Inicio de outro de presentación (salto por botón1) |
 | `cuepoints.cue4_ms` | Fin outro / inicio loop sesión A |
@@ -166,7 +166,7 @@ Al iniciar el servicio, `control.log` y journalctl muestran la config cargada y 
 
 ```
 INFO - Config cargada: video=/media/video1.mp4 | CUE1=20 CUE2=12000 ... | timer=5 min
-INFO - Iniciando reproducción (presentación pausada en CUE2)...
+INFO - Iniciando reproducción (CUE1 → pausa en CUE2)...
 INFO - Video: /media/video1.mp4
 INFO - Duración: 22356 ms (0:22) [ffprobe]
 ```
@@ -297,7 +297,7 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 
 ## Cómo funcionan los loops
 
-- **Presentación:** al arrancar, queda **pausada en `CUE2`** hasta que se pulse botón1.
+- **Presentación:** al arrancar, reproduce `CUE1 → CUE2` y queda **pausada en `CUE2`** hasta botón1.
 - **Outro presentación:** botón1 en presentación pausada → play + seek a `CUE3`; el video continúa libre hasta `CUE4`.
 - **Sesión A:** desde `CUE4`, loop `CUE4 → CUE5` mientras el timer siga activo.
 - **Sesión B:** segunda pulsación de botón1 (con timer activo) → loop `CUE6 → CUE7`. Tercera pulsación → vuelve a `CUE4`.
@@ -313,7 +313,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.2.2
+├── VERSION               # 2.2.3
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -326,6 +326,10 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.2.3 (2026-06-29)
+
+- Presentación: reproduce CUE1 y pausa al llegar a CUE2 (evita pantalla negra por seek directo).
 
 ### v2.2.2 (2026-06-29)
 

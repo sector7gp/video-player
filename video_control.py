@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.2"""
-__version__ = "2.2.2"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.3"""
+__version__ = "2.2.3"
 
 import json
 import os
@@ -511,28 +511,14 @@ seek_pausa_desde = None
 ultimo_correccion_presentacion = 0.0
 
 
-def _esperar_vlc_listo(timeout_s=10.0):
-    """Espera a que VLC reporte tiempo válido tras cargar el media."""
-    if player.get_state() in (vlc.State.NothingSpecial, vlc.State.Stopped):
-        player.play()
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if player.get_time() >= 0:
-            return True
-        time.sleep(0.05)
-    logger.warning("VLC no reportó tiempo válido tras espera inicial.")
-    return False
-
 
 def _aplicar_pausa_en_cue(ms):
-    """Pausa y corrige posición si VLC se pasó del cue objetivo."""
+    """Pausa en el frame actual (sin re-seek, evita pantalla negra)."""
     player.pause()
     if player.get_state() != vlc.State.Paused:
         player.set_pause(1)
     t = player.get_time()
-    if t >= 0 and abs(t - ms) > TOLERANCIA_MS:
-        player.set_time(ms)
-    logger.info(f"Pausa aplicada en {ms} ms (posición reportada: {t} ms).")
+    logger.info(f"Pausa aplicada cerca de {ms} ms (posición reportada: {t} ms).")
 
 
 def ir_a_tiempo(ms, reproducir=True):
@@ -586,7 +572,7 @@ def _verificar_seek_pausa(current_time):
 
 
 def _mantener_presentacion_pausada(state):
-    """Red de seguridad: presentación no debe reproducir fuera del seek-pausa."""
+    """Red de seguridad: presentación no debe reproducir fuera del tramo CUE1→CUE2."""
     global ultimo_correccion_presentacion
     if modo != MODO_PRESENTACION or pausar_al_completar_seek:
         return
@@ -596,8 +582,8 @@ def _mantener_presentacion_pausada(state):
     if ahora - ultimo_correccion_presentacion < 1.0:
         return
     ultimo_correccion_presentacion = ahora
-    logger.warning("Presentación activa sin pausa; corrigiendo seek a CUE2.")
-    ir_a_tiempo(CUE2, reproducir=False)
+    logger.warning("Presentación activa sin pausa; reiniciando CUE1→pausa CUE2.")
+    ir_a_presentacion_pausada("corrección presentación activa")
 
 
 def _timer_activo():
@@ -625,15 +611,18 @@ def _cambiar_modo(nuevo_modo, ms_destino, motivo, reproducir=True):
 
 
 def ir_a_presentacion_pausada(motivo):
-    global posicion_guardada_ms
+    """Reproduce desde CUE1 y pausa al llegar a CUE2 (frame decodificado, sin pantalla negra)."""
+    global posicion_guardada_ms, modo, pausar_al_completar_seek, cue_pausa_destino_ms
+    global seek_pausa_desde, esperando_seek
     posicion_guardada_ms = None
     _cancelar_timer()
-    _cambiar_modo(
-        MODO_PRESENTACION,
-        CUE2,
-        motivo,
-        reproducir=False,
-    )
+    modo = MODO_PRESENTACION
+    logger.info(f"Modo → presentacion ({motivo}). Reproduce CUE1 y pausará en CUE2.")
+    ir_a_tiempo(CUE1, reproducir=True)
+    pausar_al_completar_seek = True
+    cue_pausa_destino_ms = CUE2
+    seek_pausa_desde = time.monotonic()
+    esperando_seek = False
 
 
 def _loop_del_modo():
@@ -915,8 +904,7 @@ def boton1_al_soltar():
 boton1.when_pressed = registrar_presion_boton1
 boton1.when_released = boton1_al_soltar
 
-logger.info("Iniciando reproducción (presentación pausada en CUE2)...")
-_esperar_vlc_listo()
+logger.info("Iniciando reproducción (CUE1 → pausa en CUE2)...")
 ir_a_presentacion_pausada("inicio servicio")
 iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
