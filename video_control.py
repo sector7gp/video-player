@@ -783,7 +783,7 @@ def _solicitar_salida_app():
 
 
 def boton1_al_soltar():
-    """Botón1: sesión / entra o sale del loop CUE6-CUE7 (toggle con posición guardada)."""
+    """Botón1: sesión / entra o sale del loop CUE6-CUE7."""
     global ultimo_boton1, modo, posicion_guardada_ms, boton1_hold_token
     boton1_hold_token += 1  # invalida monitor de pulsación larga en curso
     duracion = time.monotonic() - momento_presion_boton1
@@ -818,22 +818,16 @@ def boton1_al_soltar():
         return
 
     if modo == MODO_SESION_A and _timer_activo():
-        current = player.get_time()
-        posicion_guardada_ms = current if current >= 0 else 0
         _cambiar_modo(MODO_SESION_B, CUE6, "botón1 dentro del timer (CUE6-CUE7)")
-        logger.info(f"Posición guardada: {posicion_guardada_ms} ms.")
         return
 
     if modo == MODO_SESION_B and _timer_activo():
-        modo = MODO_SESION_A
-        if posicion_guardada_ms is not None:
-            logger.info(
-                f"Loop CUE6-CUE7 DESACTIVADO. Vuelve a {posicion_guardada_ms} ms."
-            )
-            ir_a_tiempo(posicion_guardada_ms)
-        else:
-            logger.info("Loop CUE6-CUE7 DESACTIVADO (sin posición guardada).")
         posicion_guardada_ms = None
+        _cambiar_modo(
+            MODO_OUTRO,
+            CUE3,
+            "botón1 en sesión B (sale del loop y vuelve a CUE3)",
+        )
         return
 
     logger.info(f"GPIO23: pulsación ignorada en modo {modo}.")
