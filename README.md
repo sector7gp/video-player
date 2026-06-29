@@ -1,10 +1,10 @@
-# video-player v2.1
+# video-player v2.2
 
-Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI.
+Reproductor de video para **Raspberry Pi 5**: ffplay con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 2.1 — Resumen
+## Versión 2.2 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
@@ -18,6 +18,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 | Botón2 (GPIO24) | Siempre vuelve a **CUE1** (presentación) |
 | Configuración | `config.json` (cuepoints + timer) |
 | Audio | En `config.json` (`audio.salida`, `audio.alsa_*`) con override por env vars |
+| Backend reproducción | `ffplay` (`ffmpeg`) |
 | Servicio | `video-control.service` → `multi-user.target` |
 
 ## Flujo de estados
@@ -48,7 +49,7 @@ stateDiagram-v2
 
 ## Características
 
-- Reproducción en bucle del MP4 (`--input-repeat=-1` en instancia y medio).
+- Reproducción basada en `ffplay` con seeks por reinicio controlado desde Python.
 - **Presentación al arrancar:** loop entre `cue1_ms` y `cue2_ms`.
 - **Botón1 (GPIO23):** desde presentación inicia timer y salta a `CUE3` (outro). Al pasar `CUE4` entra a loop de sesión A (`CUE4–CUE5`).
 - **Sesión B por botón1:** en sesión A, segunda pulsación (timer activo) → loop `CUE6–CUE7` guardando posición; tercera pulsación restaura posición y vuelve a sesión A.
@@ -61,13 +62,13 @@ stateDiagram-v2
 ## Requisitos
 
 - Raspberry Pi 5
-- Raspberry Pi OS con VLC y Python 3
+- Raspberry Pi OS con ffmpeg (`ffplay`/`ffprobe`) y Python 3
 - HDMI conectado; MP4 en `/media/video1.mp4`
 - Dos botones entre GPIO y **GND** (pull-up interno en firmware)
 
 ```bash
 sudo apt update
-sudo apt install -y vlc python3-vlc python3-lgpio ffmpeg git
+sudo apt install -y ffmpeg python3-lgpio git
 sudo usermod -aG video,render,input,gpio video1
 ```
 
@@ -155,7 +156,7 @@ Plantilla (`config.json.example`):
 | `boton1_largo.overlay.centrado` | Centrado del overlay (`true/false`) |
 | `boton1_largo.overlay.color_hex` | Color del texto (hex RGB) |
 | `boton1_largo.overlay.opacidad` | Opacidad del texto (0-255) |
-| `boton1_largo.overlay.sombra_roja` | Flag de intención visual (marquee no soporta sombra real) |
+| `boton1_largo.overlay.sombra_roja` | Reservado para compatibilidad de config (sin overlay dinámico en ffplay) |
 | `audio.salida` | `hdmi` o `externa` |
 | `audio.alsa_hdmi` | Dispositivo ALSA HDMI |
 | `audio.alsa_externa` | Dispositivo ALSA externo (USB/HAT) |
@@ -175,6 +176,7 @@ Al iniciar el servicio, `control.log` y journalctl muestran la config cargada y 
 
 ```
 INFO - Config cargada: video=/media/video1.mp4 | CUE1=20 CUE2=12000 ... | timer=5 min
+INFO - Backend de reproducción: ffplay (ffplay)
 INFO - Iniciando reproducción (presentación CUE1-CUE2)...
 INFO - Video: /media/video1.mp4
 INFO - Duración: 22356 ms (0:22) [ffprobe]
@@ -238,6 +240,16 @@ En `control.log` debe aparecer: `Audio: placa externa (plughw:1,0)`.
 
 Si HDMI no suena en Pi 5, probá otro nombre de tarjeta, p. ej. `plughw:CARD=vc4hdmi1,DEV=0` en `ALSA_HDMI`.
 
+### Variables opcionales de ffplay (systemd)
+
+Podés ajustar el backend con variables de entorno en el unit:
+
+```ini
+Environment=FFPLAY_BIN=ffplay
+Environment=FFPLAY_LOGLEVEL=warning
+Environment=FFPLAY_EXTRA_ARGS=-fflags +genpts
+```
+
 ### Pérdida intermitente de audio USB (bug conocido + fix replicable)
 
 En algunas instalaciones con placa USB (por ejemplo, **VENTION CDKHB**), puede pasar que el video siga reproduciendo pero el audio se corte. Reiniciar `video-control.service` suele recuperar el sonido temporalmente.
@@ -245,7 +257,7 @@ En algunas instalaciones con placa USB (por ejemplo, **VENTION CDKHB**), puede p
 **Síntomas típicos**
 
 - El audio desaparece de forma aleatoria, sin detener el video.
-- En logs de VLC/ALSA aparece: `cannot recover playback stream: No such device`.
+- En logs de reproductor/ALSA aparece: `cannot recover playback stream: No such device`.
 - Reiniciar la app devuelve audio, pero el problema vuelve con el tiempo.
 
 **Evidencia de causa raíz (dmesg)**
@@ -314,7 +326,23 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 - **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
 - **Pulsación muy larga de botón1:** si se mantiene más de `boton1_largo.salir_app_segundos`, cierra la app.
-- **Overlay de confirmación:** al superar `boton1_largo.segundos` se muestra el texto de `boton1_largo.overlay.texto`, centrado y con tamaño configurable; al soltar se oculta.
+- **Overlay de confirmación:** no disponible en fase ffplay (las claves `overlay` se conservan en config para compatibilidad).
+
+## Rollback rápido a versión VLC
+
+Si la migración ffplay falla en campo, podés volver al backend anterior con revert git:
+
+```bash
+cd /home/video1/video-player
+git revert <commit_migracion_ffplay>
+sudo systemctl restart video-control.service
+```
+
+Referencia de rescate previa a la migración:
+
+```bash
+git checkout pre-ffplay-migration-2026-06-29
+```
 
 ## Estructura del repositorio
 
@@ -323,7 +351,7 @@ video-player/
 ├── video_control.py      # Programa principal (v2.0)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
-├── VERSION               # 2.1.1
+├── VERSION               # 2.2.0
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -336,6 +364,13 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v2.2.0 (2026-06-29)
+
+- Migración de backend: de `python-vlc` a `ffplay` (switch completo).
+- Se mantiene la máquina de estados (cuepoints/timer/botones) usando reloj monotónico + `subprocess`.
+- Overlay dinámico de pulsación larga deshabilitado temporalmente en esta fase ffplay.
+- Nuevo baseline/tag de rollback: `pre-ffplay-migration-2026-06-29`.
 
 ### v2.1.1 (2026-06-28)
 
