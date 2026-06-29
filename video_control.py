@@ -1,5 +1,5 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.0.8"""
-__version__ = "2.0.8"
+"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.1.0"""
+__version__ = "2.1.0"
 
 import json
 import os
@@ -43,11 +43,12 @@ CONFIG_DEFAULT = {
     "cuepoints": {
         "cue1_ms": 20,
         "cue2_ms": 12000,
-        "cue3_ms": 14000,
-        "cue4_ms": 14500,
-        "cue5_ms": 16000,
-        "cue6_ms": 200000,
-        "cue7_ms": 210000,
+        "cue3_ms": 13000,
+        "cue4_ms": 14000,
+        "cue5_ms": 14500,
+        "cue6_ms": 16000,
+        "cue7_ms": 200000,
+        "cue8_ms": 210000,
     },
     "timer_minutos": 5,
     "boton1_largo": {
@@ -72,6 +73,7 @@ CUE_KEYS = (
     "cue5_ms",
     "cue6_ms",
     "cue7_ms",
+    "cue8_ms",
 )
 
 
@@ -93,7 +95,7 @@ def _log_resumen_config(cfg):
         f"Config cargada: video={cfg['video']['path']} | "
         f"CUE1={cues['cue1_ms']} CUE2={cues['cue2_ms']} CUE3={cues['cue3_ms']} "
         f"CUE4={cues['cue4_ms']} CUE5={cues['cue5_ms']} CUE6={cues['cue6_ms']} "
-        f"CUE7={cues['cue7_ms']} ms | "
+        f"CUE7={cues['cue7_ms']} CUE8={cues['cue8_ms']} ms | "
         f"timer={cfg['timer_minutos']} min | "
         f"audio={audio['salida']} | "
         f"boton1_largo={cfg['boton1_largo']['segundos']}s"
@@ -379,6 +381,7 @@ CUE4 = int(config["cuepoints"]["cue4_ms"])
 CUE5 = int(config["cuepoints"]["cue5_ms"])
 CUE6 = int(config["cuepoints"]["cue6_ms"])
 CUE7 = int(config["cuepoints"]["cue7_ms"])
+CUE8 = int(config["cuepoints"]["cue8_ms"])
 TIMER_MINUTOS = float(config["timer_minutos"])
 TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
 BOTON1_LARGO_SEGUNDOS = float(config["boton1_largo"]["segundos"])
@@ -473,6 +476,7 @@ DEBOUNCE_BOTON_S = 0.40
 PULSO_MINIMO_S = 0.05
 
 MODO_PRESENTACION = "presentacion"
+MODO_OUTRO = "outro_presentacion"
 MODO_SESION_A = "sesion_a"
 MODO_SESION_B = "sesion_b"
 MODO_FINALE = "finale"
@@ -541,10 +545,12 @@ def ir_a_presentacion(motivo):
 def _loop_del_modo():
     if modo == MODO_PRESENTACION:
         return CUE1, CUE2
+    if modo == MODO_OUTRO:
+        return None, None
     if modo == MODO_SESION_A and _timer_activo():
-        return CUE3, CUE4
-    if modo == MODO_SESION_B and _timer_activo():
         return CUE4, CUE5
+    if modo == MODO_SESION_B and _timer_activo():
+        return CUE5, CUE6
     return None, None
 
 
@@ -559,25 +565,35 @@ def _seek_completado(current_time, inicio, fin):
 
 def _verificar_timer_vencido():
     global modo
-    if modo not in (MODO_SESION_A, MODO_SESION_B):
+    if modo not in (MODO_OUTRO, MODO_SESION_A, MODO_SESION_B):
         return
     if timer_fin is None or time.monotonic() < timer_fin:
         return
     _cancelar_timer()
-    _cambiar_modo(MODO_FINALE, CUE6, "timer completado")
+    _cambiar_modo(MODO_FINALE, CUE7, "timer completado")
+
+
+def _verificar_transicion_outro(current_time):
+    global modo
+    if modo != MODO_OUTRO:
+        return
+    if current_time >= 0 and current_time >= CUE4:
+        modo = MODO_SESION_A
+        logger.info("Outro finalizado (CUE3→CUE4). Modo → sesion_a (loop CUE4-CUE5).")
 
 
 def _gestionar_loop(current_time, state):
     global esperando_seek, modo, ultimo_reintento_fin
 
     _verificar_timer_vencido()
+    _verificar_transicion_outro(current_time)
 
     if modo == MODO_FINALE:
-        if current_time >= 0 and current_time >= CUE7:
+        if current_time >= 0 and current_time >= CUE8:
             ahora = time.monotonic()
             if ahora - ultimo_reintento_fin >= 0.5:
                 ultimo_reintento_fin = ahora
-                ir_a_presentacion(f"timer: CUE7 ({CUE7} ms) → reinicio en CUE1")
+                ir_a_presentacion(f"timer: CUE8 ({CUE8} ms) → reinicio en CUE1")
         elif state == vlc.State.Ended:
             ahora = time.monotonic()
             if ahora - ultimo_reintento_fin >= 0.5:
@@ -741,7 +757,7 @@ def _ejecutar_comando_boton1_largo():
 
 
 def boton1_al_soltar():
-    """Botón1: sesión / entra o sale del loop CUE4-CUE5 (toggle con posición guardada)."""
+    """Botón1: sesión / entra o sale del loop CUE5-CUE6 (toggle con posición guardada)."""
     global ultimo_boton1, modo, posicion_guardada_ms, boton1_hold_token
     boton1_hold_token += 1  # invalida monitor de pulsación larga en curso
     duracion = time.monotonic() - momento_presion_boton1
@@ -765,13 +781,13 @@ def boton1_al_soltar():
     if modo == MODO_PRESENTACION:
         posicion_guardada_ms = None
         _iniciar_timer()
-        _cambiar_modo(MODO_SESION_A, CUE3, "botón1 en presentación")
+        _cambiar_modo(MODO_OUTRO, CUE3, "botón1 en presentación (outro)")
         return
 
     if modo == MODO_SESION_A and _timer_activo():
         current = player.get_time()
         posicion_guardada_ms = current if current >= 0 else 0
-        _cambiar_modo(MODO_SESION_B, CUE4, "botón1 dentro del timer (CUE4-CUE5)")
+        _cambiar_modo(MODO_SESION_B, CUE5, "botón1 dentro del timer (CUE5-CUE6)")
         logger.info(f"Posición guardada: {posicion_guardada_ms} ms.")
         return
 
@@ -779,11 +795,11 @@ def boton1_al_soltar():
         modo = MODO_SESION_A
         if posicion_guardada_ms is not None:
             logger.info(
-                f"Loop CUE4-CUE5 DESACTIVADO. Vuelve a {posicion_guardada_ms} ms."
+                f"Loop CUE5-CUE6 DESACTIVADO. Vuelve a {posicion_guardada_ms} ms."
             )
             ir_a_tiempo(posicion_guardada_ms)
         else:
-            logger.info("Loop CUE4-CUE5 DESACTIVADO (sin posición guardada).")
+            logger.info("Loop CUE5-CUE6 DESACTIVADO (sin posición guardada).")
         posicion_guardada_ms = None
         return
 

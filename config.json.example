@@ -2,21 +2,22 @@
   "video": {
     "path": "/media/video1.mp4"
   },
+  "cuepoints": {
+    "cue1_ms": 20,
+    "cue2_ms": 12000,
+    "cue3_ms": 13000,
+    "cue4_ms": 14000,
+    "cue5_ms": 14500,
+    "cue6_ms": 16000,
+    "cue7_ms": 200000,
+    "cue8_ms": 210000
+  },
+  "timer_minutos": 5,
   "audio": {
     "salida": "hdmi",
     "alsa_hdmi": "plughw:CARD=vc4hdmi0,DEV=0",
     "alsa_externa": "plughw:CARD=Device,DEV=0"
   },
-  "cuepoints": {
-    "cue1_ms": 20,
-    "cue2_ms": 12000,
-    "cue3_ms": 14000,
-    "cue4_ms": 14500,
-    "cue5_ms": 16000,
-    "cue6_ms": 200000,
-    "cue7_ms": 210000
-  },
-  "timer_minutos": 5,
   "boton1_largo": {
     "segundos": 5,
     "comando": "systemctl restart video-control",
