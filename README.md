@@ -105,8 +105,6 @@ cd /home/video1/video-player
 python3 video_control.py
 ```
 
-En ejecución manual desde terminal, podés cerrar la app presionando `ESC` (además de `Ctrl+C`).
-
 ### Botones
 
 | Botón | Acción |
@@ -150,6 +148,7 @@ Plantilla (`config.json.example`):
 | `cuepoints.cue9_ms` | Reinicio a CUE1 al llegar aquí (post-timer) |
 | `timer_minutos` | Duración del timer tras botón1 |
 | `boton1_largo.segundos` | Umbral de pulsación larga para botón1 |
+| `boton1_largo.salir_app_segundos` | Umbral de pulsación muy larga para cerrar la app |
 | `boton1_largo.comando` | Comando a ejecutar en pulsación larga (recuperación) |
 | `boton1_largo.overlay.texto` | Texto del overlay de pulsación larga |
 | `boton1_largo.overlay.tamano` | Tamaño de fuente del overlay |
@@ -162,6 +161,7 @@ Plantilla (`config.json.example`):
 | `audio.alsa_externa` | Dispositivo ALSA externo (USB/HAT) |
 
 Los cuepoints deben ser **estrictamente crecientes**: CUE1 < CUE2 < … < CUE9.
+Para pulsación larga, `boton1_largo.salir_app_segundos` debe ser mayor que `boton1_largo.segundos`.
 
 `git pull` no modifica tu `config.json` local. El instalador crea `config.json` desde la plantilla si no existe.
 
@@ -313,6 +313,7 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 - **Finale:** timer vencido → seek a `CUE8`; al llegar a `CUE9` → reinicio en `CUE1` (presentación).
 - **Botón2:** seek a `CUE1`, cancela timer, modo presentación.
 - **Pulsación larga de botón1:** si se mantiene más de `boton1_largo.segundos`, ejecuta `boton1_largo.comando`.
+- **Pulsación muy larga de botón1:** si se mantiene más de `boton1_largo.salir_app_segundos`, cierra la app.
 - **Overlay de confirmación:** al superar `boton1_largo.segundos` se muestra el texto de `boton1_largo.overlay.texto`, centrado y con tamaño configurable; al soltar se oculta.
 
 ## Estructura del repositorio

@@ -21,6 +21,7 @@
   },
   "boton1_largo": {
     "segundos": 5,
+    "salir_app_segundos": 10,
     "comando": "systemctl restart video-control",
     "overlay": {
       "texto": "SOLTAR PARA\nREINICIAR",

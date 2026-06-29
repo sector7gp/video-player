@@ -3,12 +3,9 @@ __version__ = "2.1.1"
 
 import json
 import os
-import select
 import subprocess
 import sys
-import termios
 import threading
-import tty
 import vlc
 import time
 import logging
@@ -57,6 +54,7 @@ CONFIG_DEFAULT = {
     "timer_minutos": 5,
     "boton1_largo": {
         "segundos": 5,
+        "salir_app_segundos": 10,
         "comando": "systemctl restart video-control",
         "overlay": {
             "texto": "SOLTAR PARA\nREINICIAR",
@@ -188,6 +186,17 @@ def cargar_config():
     hold_s = boton1_largo.get("segundos")
     if not isinstance(hold_s, (int, float)) or hold_s <= 0:
         logger.error("config.json: boton1_largo.segundos debe ser un número > 0.")
+        sys.exit(1)
+    salir_app_s = boton1_largo.get("salir_app_segundos")
+    if not isinstance(salir_app_s, (int, float)) or salir_app_s <= 0:
+        logger.error(
+            "config.json: boton1_largo.salir_app_segundos debe ser un número > 0."
+        )
+        sys.exit(1)
+    if salir_app_s <= hold_s:
+        logger.error(
+            "config.json: boton1_largo.salir_app_segundos debe ser mayor que boton1_largo.segundos."
+        )
         sys.exit(1)
     comando = str(boton1_largo.get("comando", "")).strip()
     if not comando:
@@ -391,6 +400,7 @@ CUE9 = int(config["cuepoints"]["cue9_ms"])
 TIMER_MINUTOS = float(config["timer_minutos"])
 TIMER_SEGUNDOS = TIMER_MINUTOS * 60.0
 BOTON1_LARGO_SEGUNDOS = float(config["boton1_largo"]["segundos"])
+BOTON1_SALIR_APP_SEGUNDOS = float(config["boton1_largo"]["salir_app_segundos"])
 BOTON1_LARGO_COMANDO = str(config["boton1_largo"]["comando"]).strip()
 BOTON1_LARGO_OVERLAY_TEXTO = str(config["boton1_largo"]["overlay"]["texto"])
 BOTON1_LARGO_OVERLAY_TAMANO = int(config["boton1_largo"]["overlay"]["tamano"])
@@ -499,58 +509,12 @@ ultimo_boton2 = 0.0
 boton1_hold_token = 0
 boton1_overlay_visible = False
 marquee_disponible = True
-stdin_fd = None
-stdin_termios_original = None
+salir_solicitado = threading.Event()
 
 
 def asegurar_reproduciendo():
     if player.get_state() != vlc.State.Playing:
         player.play()
-
-
-def _inicializar_teclado_esc():
-    """Configura stdin en cbreak para detectar ESC sin Enter (si hay TTY)."""
-    global stdin_fd, stdin_termios_original
-    if not sys.stdin or not sys.stdin.isatty():
-        return False
-    try:
-        stdin_fd = sys.stdin.fileno()
-        stdin_termios_original = termios.tcgetattr(stdin_fd)
-        tty.setcbreak(stdin_fd)
-        logger.info("Teclado activo: presioná ESC para salir.")
-        return True
-    except Exception as e:
-        stdin_fd = None
-        stdin_termios_original = None
-        logger.warning(f"No se pudo activar lectura de ESC en teclado: {e}")
-        return False
-
-
-def _restaurar_teclado():
-    """Restaura la configuración original del terminal si fue modificada."""
-    global stdin_fd, stdin_termios_original
-    if stdin_fd is None or stdin_termios_original is None:
-        return
-    try:
-        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, stdin_termios_original)
-    except Exception:
-        pass
-    stdin_fd = None
-    stdin_termios_original = None
-
-
-def _esc_presionado():
-    """Devuelve True cuando se detecta tecla ESC en stdin."""
-    if stdin_fd is None:
-        return False
-    try:
-        ready, _, _ = select.select([stdin_fd], [], [], 0)
-        if not ready:
-            return False
-        tecla = os.read(stdin_fd, 1)
-        return tecla == b"\x1b"
-    except Exception:
-        return False
 
 
 def ir_a_tiempo(ms):
@@ -809,12 +773,28 @@ def _ejecutar_comando_boton1_largo():
         logger.error(f"Error ejecutando comando de pulsación larga: {e}")
 
 
+def _solicitar_salida_app():
+    """Solicita terminar la app de forma limpia desde el loop principal."""
+    logger.warning(
+        f"GPIO23: pulsación muy larga detectada (>= {BOTON1_SALIR_APP_SEGUNDOS}s). "
+        "Cerrando aplicación..."
+    )
+    salir_solicitado.set()
+
+
 def boton1_al_soltar():
     """Botón1: sesión / entra o sale del loop CUE6-CUE7 (toggle con posición guardada)."""
     global ultimo_boton1, modo, posicion_guardada_ms, boton1_hold_token
     boton1_hold_token += 1  # invalida monitor de pulsación larga en curso
     duracion = time.monotonic() - momento_presion_boton1
     _ocultar_overlay_boton1_largo()
+    if duracion >= BOTON1_SALIR_APP_SEGUNDOS:
+        if time.monotonic() - ultimo_boton1 < DEBOUNCE_BOTON_S:
+            logger.info("GPIO23: pulsación muy larga ignorada (antirebote software).")
+            return
+        ultimo_boton1 = time.monotonic()
+        _solicitar_salida_app()
+        return
     if duracion >= BOTON1_LARGO_SEGUNDOS:
         if time.monotonic() - ultimo_boton1 < DEBOUNCE_BOTON_S:
             logger.info("GPIO23: pulsación larga ignorada (antirebote software).")
@@ -883,12 +863,10 @@ logger.info("Iniciando reproducción (presentación CUE1-CUE2)...")
 ir_a_tiempo(CUE1)
 iniciar_log_metadatos_en_background(PATH_VIDEO, player)
 
-teclado_esc_activo = _inicializar_teclado_esc()
-
 try:
     while True:
-        if teclado_esc_activo and _esc_presionado():
-            logger.info("Tecla ESC detectada. Saliendo de la aplicación...")
+        if salir_solicitado.is_set():
+            logger.info("Salida solicitada por botón1 (pulsación > umbral).")
             break
         state = player.get_state()
         current_time = player.get_time()
@@ -899,5 +877,4 @@ except KeyboardInterrupt:
     logger.info("Interrupción por teclado detectada. Saliendo de la aplicación...")
 finally:
     player.stop()
-    _restaurar_teclado()
     logger.info("Programa finalizado.")
