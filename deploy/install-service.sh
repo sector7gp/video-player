@@ -39,7 +39,8 @@ systemctl daemon-reload
 systemctl enable video-control.service
 systemctl restart video-control.service
 
-echo "OK: servicio habilitado para arranque en multi-user (sin GUI)."
+REPO_VERSION="$(tr -d '[:space:]' < "${PROJECT_DIR}/VERSION" 2>/dev/null || echo unknown)"
+echo "OK: video-control v${REPO_VERSION} habilitado para arranque en multi-user (sin GUI)."
 echo "Estado: systemctl status video-control.service"
 echo "Log:    journalctl -u video-control.service -f"
 echo "Reiniciá para probar boot: sudo reboot"

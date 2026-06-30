@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Portal admin temporal: hotspot WiFi + edición config.json + upload video."""
 
-__version__ = "1.0.0"
-
 import hmac
 import json
 import logging
@@ -28,9 +26,12 @@ from flask import (
 
 admin_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(admin_dir)
+if project_dir not in sys.path:
+    sys.path.insert(0, project_dir)
 if admin_dir not in sys.path:
     sys.path.insert(0, admin_dir)
 
+from version import __version__  # noqa: E402
 from config_validate import validate_config  # noqa: E402
 import hotspot  # noqa: E402
 

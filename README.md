@@ -1,10 +1,10 @@
-# video-player v2.2.5
+# video-player v2.3.0
 
-Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI.
+Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI. Incluye portal admin opcional (hotspot WiFi temporal).
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 2.2.5 — Resumen
+## Versión 2.3.0 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
@@ -17,7 +17,8 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 | Timer | Al vencer → **CUE8**; al llegar a **CUE9** → **CUE1 → pausa en CUE2** |
 | Configuración | `config.json` (cuepoints + timer) |
 | Audio | En `config.json` (`audio.salida`, `audio.alsa_*`) con override por env vars |
-| Servicio | `video-control.service` → `multi-user.target` |
+| Reproductor | `video-control.service` → `multi-user.target` |
+| Portal admin (opcional) | `video-admin.service` — hotspot + web **10 min** post-boot |
 
 ## Flujo de estados
 
@@ -127,7 +128,7 @@ sudo bash deploy/install-admin.sh video1
 sudo reboot
 ```
 
-Actualizar en la Pi: `git fetch --tags && git checkout admin-v1.0.0` (o `git pull` en `main`).
+Actualizar en la Pi: `git fetch --tags && git checkout v2.3.0` (o `git pull` en `main`).
 
 ### `admin/portal.json`
 
@@ -351,14 +352,15 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 
 ```
 video-player/
-├── video_control.py      # Reproductor (v2.2.5)
+├── video_control.py      # Reproductor
+├── version.py            # Lee VERSION (fuente única de versión)
 ├── admin/
 │   ├── portal_main.py    # Portal + hotspot temporal
 │   ├── portal.json.example
 │   └── static/           # UI web
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore)
-├── VERSION               # 2.2.5
+├── VERSION               # 2.3.0
 ├── README.md
 └── deploy/
     ├── video-control.service
@@ -374,18 +376,26 @@ video-player/
 
 ## Changelog
 
-### admin-v1.0.0 (2026-06-29)
+### v2.3.0 (2026-06-29)
 
-- Release del portal admin: hotspot WiFi + web temporal (10 min post-boot).
-- Incluye fix de import Flask en `portal_main.py`.
+- **Portal admin (nuevo):** servicio `video-admin` con hotspot WiFi + portal web temporal (10 min post-boot); edición de `config.json`, upload de MP4, reinicio de `video-control`.
+- **Versión unificada:** un solo SemVer en [`VERSION`](VERSION) / [`version.py`](version.py) para reproductor y admin.
+- **Reproductor:** sin cambios funcionales respecto a v2.2.5 (presentación CUE1→pausa CUE2, botón1, sesión, timer, finale).
 
-### v1.0.0 — Portal admin (2026-06-29)
+Instalación/actualización en la Pi:
 
-- Servicio `video-admin`: hotspot WiFi + portal web temporal (10 min post-boot).
-- Edición de `config.json`, upload de MP4, reinicio de `video-control`.
-- Credenciales en `admin/portal.json` (SSID + usuario/clave compartida).
+```bash
+cd /home/video1/video-player
+git fetch --tags
+git checkout v2.3.0   # o: git pull en main
+sudo bash deploy/install-service.sh video1
+sudo bash deploy/install-admin.sh video1   # opcional
+sudo reboot
+```
 
-### v2.2.5 (2026-06-29) — estable
+> Tag legacy `admin-v1.0.0`: obsoleto; usar solo tags `v*` (p. ej. `v2.3.0`).
+
+### v2.2.5 (2026-06-29) — reproductor estable
 
 Release estable del flujo de **presentación pausada en CUE2** (sin botón2):
 
@@ -395,12 +405,12 @@ Release estable del flujo de **presentación pausada en CUE2** (sin botón2):
 - **Sin botón2:** GPIO24 eliminado del flujo operativo (v2.2.1).
 - **Estabilidad VLC/Pi:** tolerancia al pausar en cue, timeout de seek, flag `presentacion_en_reposo`, unpause antes de seek al salir de presentación.
 
-Instalación/actualización en la Pi:
+Instalación/actualización del reproductor (v2.2.5):
 
 ```bash
 cd /home/video1/video-player
 git fetch --tags
-git checkout v2.2.5   # o: git pull && quedarse en main
+git checkout v2.2.5
 sudo systemctl restart video-control.service
 ```
 

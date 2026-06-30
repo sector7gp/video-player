@@ -46,7 +46,8 @@ sed "s|/home/video1/video-player|${PROJECT_DIR}|g; s|VIDEO_USER=video1|VIDEO_USE
 systemctl daemon-reload
 systemctl enable video-admin.service
 
-echo "OK: video-admin.service habilitado (ventana temporal en cada boot)."
+REPO_VERSION="$(tr -d '[:space:]' < "${PROJECT_DIR}/VERSION" 2>/dev/null || echo unknown)"
+echo "OK: video-admin v${REPO_VERSION} habilitado (ventana temporal en cada boot)."
 echo "Editar credenciales: nano ${PORTAL_JSON}"
 echo "Estado:  systemctl status video-admin.service"
 echo "Log:     journalctl -u video-admin.service -f"

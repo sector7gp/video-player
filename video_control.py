@@ -1,5 +1,4 @@
-"""Control de video VLC + GPIO para Raspberry Pi 5 — v2.2.5"""
-__version__ = "2.2.5"
+"""Control de video VLC + GPIO para Raspberry Pi 5."""
 
 import json
 import os
@@ -11,6 +10,8 @@ import time
 import logging
 from gpiozero import Button
 from gpiozero.pins.lgpio import LGPIOFactory
+
+from version import __version__
 
 # Obtener ruta del directorio del script para el archivo de log
 script_dir = os.path.dirname(os.path.abspath(__file__))

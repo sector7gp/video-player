@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Key files**:
 - `video_control.py` — Main event loop, VLC + GPIO state machine (~930 lines)
 - `admin/portal_main.py` — Temporary admin portal + WiFi hotspot (separate service)
+- `version.py` + `VERSION` — Single SemVer for the whole repo
 - `deploy/video-control.service` — systemd unit for player auto-start
 - `deploy/video-admin.service` — systemd unit for 10-min admin window at boot
 - `deploy/install-service.sh` / `deploy/install-admin.sh` — Installation scripts
@@ -17,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture & Control Flow
 
-### State machine (v2.2.5)
+### State machine (v2.3.0)
 
 The script runs a single infinite event loop (`video_control.py`) that monitors VLC playback and GPIO. Modes (`modo`):
 
@@ -135,10 +136,9 @@ Computing video duration (`player.get_length()`) blocks briefly. Caching avoids 
 
 ## Version & Release Notes
 
-Current: **v2.2.5** (player) + **admin v1.0.0** (optional hotspot portal)
+Current: **v2.3.0** (player v2.2.5 behavior + optional admin portal)
 
-- **admin v1.0.0**: Temporary WiFi hotspot + web UI for config/video upload (10 min after boot)
-
+- **v2.3.x**: Admin portal (hotspot + web UI); unified repo versioning via `VERSION`
 - **v2.2.x**: Presentation plays CUE1→CUE2 and pauses; botón2 removed; finale returns to idle presentation; VLC/Pi pause/seek fixes
 - **v2.1.x**: CUE3 outro, independent session A/B cuepoints (CUE4–CUE7), timer CUE8/CUE9
 - **v2.0.x**: config.json cuepoints, timer, long-press botón1, overlay
