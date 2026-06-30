@@ -127,6 +127,8 @@ sudo bash deploy/install-admin.sh video1
 sudo reboot
 ```
 
+Actualizar en la Pi: `git fetch --tags && git checkout admin-v1.0.0` (o `git pull` en `main`).
+
 ### `admin/portal.json`
 
 | Campo | Descripción |
@@ -371,6 +373,11 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### admin-v1.0.0 (2026-06-29)
+
+- Release del portal admin: hotspot WiFi + web temporal (10 min post-boot).
+- Incluye fix de import Flask en `portal_main.py`.
 
 ### v1.0.0 — Portal admin (2026-06-29)
 
