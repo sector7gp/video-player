@@ -7,35 +7,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **What this is**: A Raspberry Pi 5 video kiosk player — runs MP4 files in a continuous loop with GPIO button controls and configurable audio output.
 
 **Key files**:
-- `video_control.py` — Main event loop and control logic (276 lines)
+- `video_control.py` — Main event loop, VLC + GPIO state machine (~930 lines)
 - `deploy/video-control.service` — systemd unit for auto-start
 - `deploy/install-service.sh` — Installation script
 
 ## Architecture & Control Flow
 
-### Main Loop (video_control.py:242–300)
+### State machine (v2.2.5)
 
-The script runs a single infinite event loop that monitors VLC playback state and manages two concurrent control patterns:
+The script runs a single infinite event loop (`video_control.py`) that monitors VLC playback and GPIO. Modes (`modo`):
 
-1. **Short Loop Mode** (GPIO23 toggle): When `estado_loop_corto=True`, repeatedly seek between `INICIO_LOOP_MS` (14s) and `FIN_LOOP_MS` (14.5s). The loop saves the playback position before entering and restores it on exit.
+| Mode | Behavior |
+|------|----------|
+| `presentacion` | On boot or after finale: play `CUE1 → CUE2`, pause at `CUE2` (`presentacion_en_reposo`) |
+| `outro_presentacion` | Botón1 from idle: timer starts, unpause + seek `CUE3`, free play until `CUE4` |
+| `sesion_a` | Loop `CUE4 → CUE5` while timer active |
+| `sesion_b` | Loop `CUE6 → CUE7` while timer active (botón1 from sesión A) |
+| `finale` | Timer expired: seek `CUE8`, play to `CUE9`, return to presentation |
 
-2. **Main Loop Mode** (default): Anticipatory restart — when playback reaches `umbral_reinicio()` (calculated as video duration minus `MARGEN_ANTES_FIN_MS`), seek to `RESTART_MS` *before* the file ends. This avoids VLC's buffer black-screen artifact. Fallback: if VLC still reaches `Ended` state, force restart via `ir_a_tiempo()`.
+Configuration: `config.json` (`cuepoints.cue1_ms` … `cue9_ms`, `timer_minutos`).
 
-### State Management
+### Presentation pause (CUE1 → CUE2)
 
-Key global variables track:
-- `estado_loop_corto` — Is short loop active?
-- `posicion_guardada_ms` — Playback position to restore after short loop
-- `esperando_seek` / `esperando_seek_principal` — Debounce flags during seeks (wait for playback to catch up before checking position)
-- `umbral_reinicio_cache` — Cached restart threshold (computed once from video duration)
+`ir_a_presentacion_pausada()` seeks to `CUE1`, plays forward, and `_verificar_seek_pausa()` pauses when `current_time >= CUE2`. Do **not** seek directly to `CUE2` on Pi/VLC — causes black screen.
 
-### Button Debouncing
+Leaving presentation: botón1 calls `ir_a_tiempo(CUE3)` after `set_pause(0)` — VLC on Pi does not seek reliably while Paused.
+
+### Session loops
+
+`_loop_del_modo()` returns loop bounds per mode. `_gestionar_loop()` seeks back to loop start when `current_time >= fin`.
+
+### Button debouncing
 
 Two-layer approach:
 1. **Hardware**: 50ms bounce time on gpiozero `Button` objects
-2. **Software**: 400ms `DEBOUNCE_TOGGLE_S` between successive presses + 50ms `PULSO_MINIMO_S` minimum pulse duration
+2. **Software**: 400ms between successive presses + 50ms minimum pulse duration
 
-GPIO23 callback chain: `when_pressed` → `registrar_presion_loop()` (record timestamp) → `when_released` → `alternar_loop_al_soltar()` (validate timing, toggle state).
+GPIO23 only: `when_pressed` → `registrar_presion_boton1()` → `when_released` → `boton1_al_soltar()`.
+
+Long press: `boton1_largo.segundos` runs shell command; `salir_app_segundos` exits app cleanly.
 
 ### Audio Configuration
 
@@ -121,9 +131,11 @@ Computing video duration (`player.get_length()`) blocks briefly. Caching avoids 
 
 ## Version & Release Notes
 
-Current: **v1.2.0** (configurable audio output via ALSA)
+Current: **v2.2.5** (presentation idle at CUE2, single botón1, stable on Pi/VLC)
 
-- **v1.1.0**: Anticipatory main loop restart
-- **v1.0.0**: Initial stable release (GPIO + loop)
+- **v2.2.x**: Presentation plays CUE1→CUE2 and pauses; botón2 removed; finale returns to idle presentation; VLC/Pi pause/seek fixes
+- **v2.1.x**: CUE3 outro, independent session A/B cuepoints (CUE4–CUE7), timer CUE8/CUE9
+- **v2.0.x**: config.json cuepoints, timer, long-press botón1, overlay
+- **v1.x**: Legacy GPIO loop player (superseded)
 
 See `README.md` for full changelog and Spanish documentation.

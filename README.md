@@ -1,20 +1,20 @@
-# video-player v2.2
+# video-player v2.2.5
 
 Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, timer de sesión y control por GPIO. Arranque automático con systemd. Pensado para kiosk con HDMI.
 
 **Repositorio:** [github.com/sector7gp/video-player](https://github.com/sector7gp/video-player)
 
-## Versión 2.2 — Resumen
+## Versión 2.2.5 — Resumen
 
 | Elemento | Valor |
 |----------|--------|
 | Plataforma | Raspberry Pi 5, `lgpio` (chip 0) |
 | Proyecto en la Pi | `/home/video1/video-player` |
 | Video | `/media/video1.mp4` |
-| Arranque | **Pausa en CUE2** (sin loop) |
+| Arranque | Reproduce **CUE1 → CUE2** y queda **pausado en CUE2** |
 | Botón1 (GPIO23) | Desde presentación pausada: **play + salta a CUE3** (outro) y continúa a CUE4; luego loop sesión A **CUE4 → CUE5** |
 | Botón1 (2.ª pulsación) | En sesión A: loop sesión B **CUE6 → CUE7** |
-| Timer | Al vencer → **CUE8**; al llegar a **CUE9** → **pausa en CUE2** |
+| Timer | Al vencer → **CUE8**; al llegar a **CUE9** → **CUE1 → pausa en CUE2** |
 | Configuración | `config.json` (cuepoints + timer) |
 | Audio | En `config.json` (`audio.salida`, `audio.alsa_*`) con override por env vars |
 | Servicio | `video-control.service` → `multi-user.target` |
@@ -24,7 +24,7 @@ Reproductor de video para **Raspberry Pi 5**: VLC con cuepoints configurables, t
 ```mermaid
 stateDiagram-v2
     direction LR
-    Presentacion: Presentación pausada\nen CUE2
+    Presentacion: Presentación\nCUE1 → pausa CUE2
     Outro: OutroPresentacion\nCUE3 → CUE4
     SesionA: Sesión A\nloop CUE4-CUE5
     SesionB: Sesión B\nloop CUE6-CUE7
@@ -37,7 +37,7 @@ stateDiagram-v2
     Outro --> Finale: Timer vence
     SesionA --> Finale: Timer vence
     SesionB --> Finale: Timer vence
-    Finale --> Presentacion: CUE9 pausa en CUE2
+    Finale --> Presentacion: CUE9 → CUE1 → pausa CUE2
 ```
 
 ## Características
@@ -310,7 +310,7 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 
 ```
 video-player/
-├── video_control.py      # Programa principal (v2.0)
+├── video_control.py      # Programa principal (v2.2.5)
 ├── config.json.example   # Plantilla de cuepoints + timer
 ├── config.json           # Local (gitignore); copiar desde .example
 ├── VERSION               # 2.2.5
@@ -327,9 +327,24 @@ video-player/
 
 ## Changelog
 
-### v2.2.5 (2026-06-29)
+### v2.2.5 (2026-06-29) — estable
 
-- Botón1 en presentación: reanuda VLC antes del seek a CUE3 (seek en Paused fallaba en Pi).
+Release estable del flujo de **presentación pausada en CUE2** (sin botón2):
+
+- **Arranque y cierre:** reproduce `CUE1 → CUE2` y pausa (decodifica frames; evita pantalla negra por seek directo a CUE2).
+- **Botón1 (GPIO23):** desde presentación pausada inicia timer, reanuda VLC, seek a `CUE3` y continúa el flujo outro/sesión/finale.
+- **Fin de sesión:** al llegar a `CUE9` vuelve a `CUE1 → pausa en CUE2`.
+- **Sin botón2:** GPIO24 eliminado del flujo operativo (v2.2.1).
+- **Estabilidad VLC/Pi:** tolerancia al pausar en cue, timeout de seek, flag `presentacion_en_reposo`, unpause antes de seek al salir de presentación.
+
+Instalación/actualización en la Pi:
+
+```bash
+cd /home/video1/video-player
+git fetch --tags
+git checkout v2.2.5   # o: git pull && quedarse en main
+sudo systemctl restart video-control.service
+```
 
 ### v2.2.4 (2026-06-29)
 
