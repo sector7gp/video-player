@@ -3,6 +3,7 @@ __pycache__/
 *.log
 control.log
 config.json
+admin/portal.json
 .env
 .DS_Store
 *.mp4

@@ -1,0 +1,150 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f1419;
+  color: #e7ecf1;
+  line-height: 1.45;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid #2a3441;
+  background: #151c24;
+}
+
+.top h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.top-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.card {
+  background: #151c24;
+  border: 1px solid #2a3441;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card h1, .card h2 {
+  margin-top: 0;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+input[type="text"],
+input[type="password"],
+textarea {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #3d4f63;
+  border-radius: 6px;
+  background: #0f1419;
+  color: #e7ecf1;
+  font: inherit;
+}
+
+textarea {
+  min-height: 320px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+}
+
+button {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #3b82f6;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #374151;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.muted {
+  color: #94a3b8;
+  font-size: 0.88rem;
+}
+
+.badge {
+  background: #1e3a5f;
+  color: #93c5fd;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.error {
+  color: #f87171;
+}
+
+.msg {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.msg.ok {
+  color: #4ade80;
+}
+
+.msg.err {
+  color: #f87171;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.file-label input {
+  margin-top: 0.35rem;
+}
+
+.progress-wrap {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+progress {
+  flex: 1;
+  height: 1rem;
+}

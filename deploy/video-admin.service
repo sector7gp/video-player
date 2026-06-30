@@ -1,0 +1,18 @@
+[Unit]
+Description=Portal admin temporal (hotspot WiFi + config/video)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/video1/video-player
+Environment=PORTAL_PATH=/home/video1/video-player/admin/portal.json
+Environment=VIDEO_USER=video1
+ExecStart=/usr/bin/python3 /home/video1/video-player/admin/portal_main.py
+Restart=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

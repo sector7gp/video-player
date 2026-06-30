@@ -8,8 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key files**:
 - `video_control.py` — Main event loop, VLC + GPIO state machine (~930 lines)
-- `deploy/video-control.service` — systemd unit for auto-start
-- `deploy/install-service.sh` — Installation script
+- `admin/portal_main.py` — Temporary admin portal + WiFi hotspot (separate service)
+- `deploy/video-control.service` — systemd unit for player auto-start
+- `deploy/video-admin.service` — systemd unit for 10-min admin window at boot
+- `deploy/install-service.sh` / `deploy/install-admin.sh` — Installation scripts
+
+**Do not mix** admin portal logic into `video_control.py`; the admin service restarts the player via `systemctl`.
 
 ## Architecture & Control Flow
 
@@ -131,7 +135,9 @@ Computing video duration (`player.get_length()`) blocks briefly. Caching avoids 
 
 ## Version & Release Notes
 
-Current: **v2.2.5** (presentation idle at CUE2, single botón1, stable on Pi/VLC)
+Current: **v2.2.5** (player) + **admin v1.0.0** (optional hotspot portal)
+
+- **admin v1.0.0**: Temporary WiFi hotspot + web UI for config/video upload (10 min after boot)
 
 - **v2.2.x**: Presentation plays CUE1→CUE2 and pauses; botón2 removed; finale returns to idle presentation; VLC/Pi pause/seek fixes
 - **v2.1.x**: CUE3 outro, independent session A/B cuepoints (CUE4–CUE7), timer CUE8/CUE9

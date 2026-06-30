@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VIDEO1 Admin — Login</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="card">
+    <h1>VIDEO1 Admin</h1>
+    <p class="muted">Misma clave que el WiFi del hotspot.</p>
+    <form id="login-form">
+      <label>
+        Usuario
+        <input type="text" name="usuario" autocomplete="username" required>
+      </label>
+      <label>
+        Clave
+        <input type="password" name="clave" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Entrar</button>
+      <p id="login-error" class="error hidden"></p>
+    </form>
+    <p id="status-line" class="muted"></p>
+  </main>
+  <script src="/static/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VIDEO1 Admin</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>VIDEO1 Admin</h1>
+    <div class="top-actions">
+      <span id="countdown" class="badge"></span>
+      <button type="button" id="logout-btn" class="secondary">Salir</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Video</h2>
+      <p id="video-path" class="muted"></p>
+      <label class="file-label">
+        Subir MP4
+        <input type="file" id="video-file" accept="video/mp4,.mp4">
+      </label>
+      <button type="button" id="upload-btn">Subir y reiniciar reproductor</button>
+      <div class="progress-wrap hidden" id="progress-wrap">
+        <progress id="upload-progress" max="100" value="0"></progress>
+        <span id="progress-text">0%</span>
+      </div>
+      <p id="upload-msg" class="msg hidden"></p>
+    </section>
+
+    <section class="card">
+      <h2>config.json</h2>
+      <textarea id="config-editor" spellcheck="false"></textarea>
+      <div class="row">
+        <button type="button" id="reload-btn" class="secondary">Recargar</button>
+        <button type="button" id="save-btn">Guardar y reiniciar reproductor</button>
+      </div>
+      <p id="config-msg" class="msg hidden"></p>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

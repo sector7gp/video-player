@@ -1,0 +1,11 @@
+{
+  "hotspot": {
+    "ssid": "VIDEO1-Setup",
+    "usuario": "admin",
+    "clave": "cambiar-clave-min-8"
+  },
+  "ventana_minutos": 10,
+  "puerto": 8080,
+  "config_path": "/home/video1/video-player/config.json",
+  "max_upload_gb": 8
+}

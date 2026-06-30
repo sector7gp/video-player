@@ -113,6 +113,45 @@ tail -f /home/video1/video-player/control.log
 
 El unit (`deploy/video-control.service`) arranca sin escritorio: espera `/dev/dri/card0`, `WorkingDirectory` y script en `video-player/`.
 
+## Portal admin (hotspot temporal)
+
+Servicio **independiente** del reproductor: durante **10 minutos** tras cada boot expone un hotspot WiFi y un portal web para editar `config.json` y subir el MP4.
+
+### Instalación
+
+```bash
+cd /home/video1/video-player
+cp admin/portal.json.example admin/portal.json   # primera vez
+nano admin/portal.json                           # cambiar hotspot.clave
+sudo bash deploy/install-admin.sh video1
+sudo reboot
+```
+
+### `admin/portal.json`
+
+| Campo | Descripción |
+|-------|-------------|
+| `hotspot.ssid` | Nombre de la red WiFi |
+| `hotspot.usuario` | Usuario del portal web |
+| `hotspot.clave` | Clave WPA (≥8 chars) **y** contraseña del portal web |
+| `ventana_minutos` | Duración de la ventana (default 10) |
+| `puerto` | Puerto HTTP del portal (default 8080) |
+| `config_path` | Ruta a `config.json` del reproductor |
+
+### Uso
+
+1. Tras el boot, conectate al WiFi `ssid` con `clave`.
+2. Abrí `http://192.168.4.1:8080` (o la IP que muestre el log).
+3. Login con `usuario` + `clave`.
+4. Editá `config.json` o subí un MP4 → el reproductor se reinicia automáticamente.
+5. A los 10 minutos el hotspot y el portal se apagan; **`video-control` sigue corriendo**.
+
+```bash
+journalctl -u video-admin.service -f
+```
+
+**Nota:** con un solo chip WiFi, durante la ventana admin la Pi no estará conectada como cliente a otra red.
+
 ## Configuración
 
 ### `config.json`
@@ -310,14 +349,20 @@ En este kernel de Raspberry Pi puede no existir el parámetro `power_save` para 
 
 ```
 video-player/
-├── video_control.py      # Programa principal (v2.2.5)
+├── video_control.py      # Reproductor (v2.2.5)
+├── admin/
+│   ├── portal_main.py    # Portal + hotspot temporal
+│   ├── portal.json.example
+│   └── static/           # UI web
 ├── config.json.example   # Plantilla de cuepoints + timer
-├── config.json           # Local (gitignore); copiar desde .example
+├── config.json           # Local (gitignore)
 ├── VERSION               # 2.2.5
 ├── README.md
 └── deploy/
     ├── video-control.service
-    └── install-service.sh
+    ├── video-admin.service
+    ├── install-service.sh
+    └── install-admin.sh
 ```
 
 ## Notas
@@ -326,6 +371,12 @@ video-player/
 - Si usás **X11** (`DISPLAY=:0`), adaptá el `.service` localmente; la v1.0 por defecto es headless/DRM.
 
 ## Changelog
+
+### v1.0.0 — Portal admin (2026-06-29)
+
+- Servicio `video-admin`: hotspot WiFi + portal web temporal (10 min post-boot).
+- Edición de `config.json`, upload de MP4, reinicio de `video-control`.
+- Credenciales en `admin/portal.json` (SSID + usuario/clave compartida).
 
 ### v2.2.5 (2026-06-29) — estable
 
